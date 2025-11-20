@@ -1,3 +1,5 @@
+// app/navigation/DrawerNavigator.tsx
+
 import React from 'react';
 import {
   createDrawerNavigator,
@@ -9,13 +11,17 @@ import { View, Text, StyleSheet, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import AppNavigator from './AppNavigator';
+import LoginScreen from '../screens/LoginScreen';
+import ProfileScreen from '../screens/ProfileScreen'; // <-- NOVO
 import { AppTheme } from '../../constants/theme';
 
-type DrawerParamList = {
+export type RootDrawerParamList = {
   AppTabs: undefined;
+  Login: undefined;
+  Profile: undefined; // <-- NOVO
 };
 
-const Drawer = createDrawerNavigator<DrawerParamList>();
+const Drawer = createDrawerNavigator<RootDrawerParamList>();
 
 function CustomDrawerContent(props: DrawerContentComponentProps) {
   return (
@@ -23,7 +29,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
       {...props}
       style={{ backgroundColor: AppTheme.drawerBackground }}
     >
-      {/* Cabeçalho do menu lateral */}
+      {/* CABEÇALHO DO MENU LATERAL */}
       <View style={styles.header}>
         <Image
           source={{
@@ -35,13 +41,13 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         <Text style={styles.clubDesc}>Handebol de Luzerna</Text>
       </View>
 
-      {/* Itens do Drawer */}
+      {/* ITENS DO MENU */}
       <DrawerItem
         label="Início"
         labelStyle={styles.drawerLabel}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Inicio' })}
-        icon={({ size }) => (
-          <Ionicons name="home-outline" color="#FFF" size={size ?? 20} />
+        icon={({ size, color }) => (
+          <Ionicons name="home-outline" color={color ?? '#FFF'} size={size ?? 20} />
         )}
       />
 
@@ -49,8 +55,8 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         label="Atletas"
         labelStyle={styles.drawerLabel}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Atletas' })}
-        icon={({ size }) => (
-          <Ionicons name="people-outline" color="#FFF" size={size ?? 20} />
+        icon={({ size, color }) => (
+          <Ionicons name="people-outline" color={color ?? '#FFF'} size={size ?? 20} />
         )}
       />
 
@@ -58,10 +64,10 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         label="Equipes"
         labelStyle={styles.drawerLabel}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Equipes' })}
-        icon={({ size }) => (
+        icon={({ size, color }) => (
           <Ionicons
             name="shield-checkmark-outline"
-            color="#FFF"
+            color={color ?? '#FFF'}
             size={size ?? 20}
           />
         )}
@@ -71,8 +77,8 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         label="Treinos"
         labelStyle={styles.drawerLabel}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Treinos' })}
-        icon={({ size }) => (
-          <Ionicons name="calendar-outline" color="#FFF" size={size ?? 20} />
+        icon={({ size, color }) => (
+          <Ionicons name="calendar-outline" color={color ?? '#FFF'} size={size ?? 20} />
         )}
       />
 
@@ -80,8 +86,8 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         label="Produtos"
         labelStyle={styles.drawerLabel}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Produtos' })}
-        icon={({ size }) => (
-          <Ionicons name="pricetags-outline" color="#FFF" size={size ?? 20} />
+        icon={({ size, color }) => (
+          <Ionicons name="pricetags-outline" color={color ?? '#FFF'} size={size ?? 20} />
         )}
       />
 
@@ -89,8 +95,8 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         label="Diretoria"
         labelStyle={styles.drawerLabel}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Diretoria' })}
-        icon={({ size }) => (
-          <Ionicons name="business-outline" color="#FFF" size={size ?? 20} />
+        icon={({ size, color }) => (
+          <Ionicons name="business-outline" color={color ?? '#FFF'} size={size ?? 20} />
         )}
       />
     </DrawerContentScrollView>
@@ -106,12 +112,33 @@ export default function DrawerNavigator() {
           backgroundColor: AppTheme.drawerBackground,
           width: 260,
         },
+        drawerActiveTintColor: '#FFF',
+        drawerInactiveTintColor: '#FFF',
       }}
       drawerContent={(props: DrawerContentComponentProps) => (
         <CustomDrawerContent {...props} />
       )}
     >
+      {/* Tabs principais */}
       <Drawer.Screen name="AppTabs" component={AppNavigator} />
+
+      {/* Tela de Login (não aparece no menu lateral) */}
+      <Drawer.Screen
+        name="Login"
+        component={LoginScreen}
+        options={{
+          drawerItemStyle: { display: 'none' },
+        }}
+      />
+
+      {/* Tela de Perfil (não aparece no menu lateral) */}
+      <Drawer.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          drawerItemStyle: { display: 'none' },
+        }}
+      />
     </Drawer.Navigator>
   );
 }

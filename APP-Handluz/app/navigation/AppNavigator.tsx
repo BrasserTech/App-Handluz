@@ -1,6 +1,11 @@
+// app/navigation/AppNavigator.tsx
+
 import React from 'react';
+import { TouchableOpacity } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import type { DrawerNavigationProp } from '@react-navigation/drawer';
 
 import HomeScreen from '../screens/HomeScreen';
 import EquipesListScreen from '../screens/EquipesListScreen';
@@ -9,6 +14,8 @@ import ProdutosListScreen from '../screens/ProdutosListScreen';
 import DiretoriaScreen from '../screens/DiretoriaScreen';
 import AtletasStackNavigator from './AtletasStackNavigator';
 import { AppTheme } from '../../constants/theme';
+import type { RootDrawerParamList } from './DrawerNavigator';
+import { useAuth } from '../context/AuthContext';
 
 export type RootTabParamList = {
   Inicio: undefined;
@@ -21,6 +28,35 @@ export type RootTabParamList = {
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 
+type DrawerNav = DrawerNavigationProp<RootDrawerParamList>;
+
+function HeaderProfileButton() {
+  const navigation = useNavigation<DrawerNav>();
+  const { user } = useAuth();
+
+  const iconName =
+    user?.role === 'diretoria' || user?.role === 'admin'
+      ? 'person'
+      : 'person-circle-outline';
+
+  function handlePress() {
+    if (user) {
+      navigation.navigate('Profile');
+    } else {
+      navigation.navigate('Login');
+    }
+  }
+
+  return (
+    <TouchableOpacity
+      onPress={handlePress}
+      style={{ paddingRight: 16 }}
+    >
+      <Ionicons name={iconName as any} size={26} color="#FFFFFF" />
+    </TouchableOpacity>
+  );
+}
+
 export default function AppNavigator() {
   return (
     <Tab.Navigator
@@ -32,6 +68,8 @@ export default function AppNavigator() {
         headerTitleStyle: {
           fontWeight: '600',
         },
+        headerRight: () => <HeaderProfileButton />,
+
         tabBarActiveTintColor: AppTheme.tabIconSelected,
         tabBarInactiveTintColor: AppTheme.tabIconDefault,
         tabBarStyle: {
