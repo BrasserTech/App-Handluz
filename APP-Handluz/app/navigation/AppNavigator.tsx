@@ -8,18 +8,16 @@ import { useNavigation } from '@react-navigation/native';
 import type { DrawerNavigationProp } from '@react-navigation/drawer';
 
 import HomeScreen from '../screens/HomeScreen';
-import EquipesListScreen from '../screens/EquipesListScreen';
 import TreinosListScreen from '../screens/TreinosListScreen';
 import ProdutosListScreen from '../screens/ProdutosListScreen';
 import DiretoriaScreen from '../screens/DiretoriaScreen';
-import AtletasStackNavigator from './AtletasStackNavigator';
+import EquipesStackNavigator from './EquipesStackNavigator';
 import { AppTheme } from '../../constants/theme';
 import type { RootDrawerParamList } from './DrawerNavigator';
 import { useAuth } from '../context/AuthContext';
 
 export type RootTabParamList = {
   Inicio: undefined;
-  Atletas: undefined;
   Equipes: undefined;
   Treinos: undefined;
   Produtos: undefined;
@@ -86,10 +84,6 @@ export default function AppNavigator() {
           switch (route.name) {
             case 'Inicio':
               return <Ionicons name="home-outline" size={size} color={color} />;
-            case 'Atletas':
-              return (
-                <Ionicons name="people-outline" size={size} color={color} />
-              );
             case 'Equipes':
               return (
                 <Ionicons
@@ -119,8 +113,7 @@ export default function AppNavigator() {
       })}
     >
       <Tab.Screen name="Inicio" component={HomeScreen} />
-      <Tab.Screen name="Atletas" component={AtletasStackNavigator} />
-      <Tab.Screen name="Equipes" component={EquipesListScreen} />
+      <Tab.Screen name="Equipes" component={EquipesStackNavigator} />
       <Tab.Screen name="Treinos" component={TreinosListScreen} />
       <Tab.Screen name="Produtos" component={ProdutosListScreen} />
       <Tab.Screen name="Diretoria" component={DiretoriaScreen} />

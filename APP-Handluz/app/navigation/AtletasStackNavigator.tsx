@@ -1,6 +1,6 @@
 import React from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
-import AtletasListScreen from '../screens/AtletasListScreen';
+import AtletasListScreen from '../screens/EquipeAtletasScreen';
 import AtletaDetailScreen from '../screens/AtletaDetailScreen';
 import { Atleta } from '../services/models';
 
