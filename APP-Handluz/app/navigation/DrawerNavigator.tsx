@@ -12,13 +12,13 @@ import { Ionicons } from '@expo/vector-icons';
 
 import AppNavigator from './AppNavigator';
 import LoginScreen from '../screens/LoginScreen';
-import ProfileScreen from '../screens/ProfileScreen'; // <-- NOVO
+import ProfileScreen from '../screens/ProfileScreen';
 import { AppTheme } from '../../constants/theme';
 
 export type RootDrawerParamList = {
   AppTabs: undefined;
   Login: undefined;
-  Profile: undefined; // <-- NOVO
+  Profile: undefined;
 };
 
 const Drawer = createDrawerNavigator<RootDrawerParamList>();
@@ -137,6 +137,11 @@ export default function DrawerNavigator() {
         component={ProfileScreen}
         options={{
           drawerItemStyle: { display: 'none' },
+          headerShown: true,
+          title: 'Perfil',
+          headerStyle: { backgroundColor: AppTheme.primary },
+          headerTintColor: '#FFFFFF',
+          headerTitleStyle: { color: '#FFFFFF', fontWeight: '600' },
         }}
       />
     </Drawer.Navigator>

@@ -6,7 +6,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Image,
   TouchableOpacity,
   ActivityIndicator,
   ScrollView,
@@ -53,7 +52,7 @@ export default function ProfileScreen() {
 
   if (!user) {
     return (
-      <View style={styles.centered}>
+      <View style={styles.emptyContainer}>
         <Text style={styles.errorText}>
           Nenhum usuário autenticado. Faça login novamente.
         </Text>
@@ -77,7 +76,6 @@ export default function ProfileScreen() {
   }
 
   async function handleSaveRole() {
-    // captura segura do e-mail para o TypeScript
     const currentEmail = user?.email;
     if (!currentEmail) return;
 
@@ -112,23 +110,18 @@ export default function ProfileScreen() {
   }
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: AppTheme.background }}
-      contentContainerStyle={styles.scrollContent}
-    >
-      <View style={styles.card}>
-        <Image
-          source={{
-            uri: 'https://images.pexels.com/photos/114296/pexels-photo-114296.jpeg',
-          }}
-          style={styles.heroImage}
-        />
-
+    <View style={styles.container}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* TÍTULO E INTRODUÇÃO (PADRÃO, SEM CARD) */}
         <Text style={styles.title}>Meu perfil</Text>
         <Text style={styles.subtitle}>
           Veja seus dados de acesso e defina como você participa do HandLuz.
         </Text>
 
+        {/* INFORMAÇÕES PESSOAIS */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Informações pessoais</Text>
 
@@ -143,6 +136,7 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* PAPEL NO HANDLUZ */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Papel no HandLuz</Text>
           <Text style={styles.sectionHelper}>
@@ -198,6 +192,7 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* FEEDBACK E BOTÃO */}
         {feedback && <Text style={styles.feedbackText}>{feedback}</Text>}
         {error && <Text style={styles.errorText}>{error}</Text>}
 
@@ -213,45 +208,32 @@ export default function ProfileScreen() {
             <Text style={styles.saveButtonText}>Salvar alterações</Text>
           )}
         </TouchableOpacity>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
+// ==================== ESTILOS ====================
+
 const styles = StyleSheet.create({
-  scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 24,
+  container: {
+    flex: 1,
+    backgroundColor: AppTheme.background,
   },
-  centered: {
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingBottom: 24,
+  },
+  emptyContainer: {
     flex: 1,
     backgroundColor: AppTheme.background,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: AppTheme.surface,
-    borderRadius: 20,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: AppTheme.border,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
-  },
-  heroImage: {
-    width: '100%',
-    height: 150,
-    borderRadius: 14,
-    marginBottom: 16,
   },
   title: {
     fontSize: 22,
@@ -379,6 +361,6 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 13,
     color: '#D32F2F',
-    textAlign: 'center',
+    textAlign: 'left',
   },
 });
