@@ -1,5 +1,5 @@
 // app/screens/EquipesListScreen.tsx
-// Listagem de equipes.
+// Listagem de equipes (tabela public.teams).
 // Diretoria/Admin: pode criar, editar e excluir.
 // Usuário comum: apenas visualiza e acessa atletas da equipe.
 
@@ -17,23 +17,25 @@ import {
   Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
-import { usePermissions } from '../hooks/usePermissions';
+import { usePermissions } from '../../hooks/usePermissions';
 import type { EquipesStackParamList } from '../navigation/EquipesStackNavigator';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-type Props = NativeStackScreenProps<EquipesStackParamList, 'EquipesList'>;
+type EquipesNav = NativeStackNavigationProp<EquipesStackParamList>;
 
 type Equipe = {
   id: string;
-  nome: string;
-  categoria: string | null;
+  name: string;
+  category: string | null;
 };
 
-export default function EquipesListScreen({ navigation }: Props) {
+export default function EquipesListScreen() {
   const { isDiretoriaOrAdmin } = usePermissions();
+  const navigation = useNavigation<EquipesNav>();
 
   const [equipes, setEquipes] = useState<Equipe[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -45,13 +47,15 @@ export default function EquipesListScreen({ navigation }: Props) {
   const [formCategoria, setFormCategoria] = useState<string>('');
   const [saving, setSaving] = useState<boolean>(false);
 
+  // ===================== CARREGAR EQUIPES =====================
+
   const loadEquipes = useCallback(async () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
-        .from('equipes')
-        .select('id, nome, categoria')
-        .order('nome', { ascending: true });
+        .from('teams')               // <<< tabela correta
+        .select('id, name, category') // <<< campos esperados
+        .order('name', { ascending: true });
 
       if (error) {
         console.error('[EquipesListScreen] Erro ao carregar equipes:', error.message);
@@ -76,6 +80,8 @@ export default function EquipesListScreen({ navigation }: Props) {
     setRefreshing(false);
   }
 
+  // ===================== CRUD (DIRETORIA/ADMIN) =====================
+
   function openCreateModal() {
     setEditingEquipe(null);
     setFormNome('');
@@ -85,8 +91,8 @@ export default function EquipesListScreen({ navigation }: Props) {
 
   function openEditModal(equipe: Equipe) {
     setEditingEquipe(equipe);
-    setFormNome(equipe.nome);
-    setFormCategoria(equipe.categoria ?? '');
+    setFormNome(equipe.name);
+    setFormCategoria(equipe.category ?? '');
     setModalVisible(true);
   }
 
@@ -102,10 +108,10 @@ export default function EquipesListScreen({ navigation }: Props) {
       if (editingEquipe) {
         // Atualização
         const { error } = await supabase
-          .from('equipes')
+          .from('teams')
           .update({
-            nome: formNome.trim(),
-            categoria: formCategoria.trim() || null,
+            name: formNome.trim(),
+            category: formCategoria.trim() || null,
           })
           .eq('id', editingEquipe.id);
 
@@ -116,9 +122,9 @@ export default function EquipesListScreen({ navigation }: Props) {
         }
       } else {
         // Criação
-        const { error } = await supabase.from('equipes').insert({
-          nome: formNome.trim(),
-          categoria: formCategoria.trim() || null,
+        const { error } = await supabase.from('teams').insert({
+          name: formNome.trim(),
+          category: formCategoria.trim() || null,
         });
 
         if (error) {
@@ -145,7 +151,7 @@ export default function EquipesListScreen({ navigation }: Props) {
   function handleDeleteEquipe(equipe: Equipe) {
     Alert.alert(
       'Remover equipe',
-      `Deseja realmente excluir a equipe "${equipe.nome}"?`,
+      `Deseja realmente excluir a equipe "${equipe.name}"?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -154,7 +160,7 @@ export default function EquipesListScreen({ navigation }: Props) {
           onPress: async () => {
             try {
               const { error } = await supabase
-                .from('equipes')
+                .from('teams')
                 .delete()
                 .eq('id', equipe.id);
 
@@ -184,20 +190,24 @@ export default function EquipesListScreen({ navigation }: Props) {
     );
   }
 
+  // ===================== NAVEGAÇÃO PARA ATLETAS =====================
+
   function handleOpenAtletas(equipe: Equipe) {
     navigation.navigate('EquipeAtletas', {
       equipeId: equipe.id,
-      equipeNome: equipe.nome,
+      equipeNome: equipe.name,
     });
   }
+
+  // ===================== RENDER =====================
 
   function renderItem({ item }: { item: Equipe }) {
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>{item.nome}</Text>
-          {item.categoria ? (
-            <Text style={styles.cardBadge}>{item.categoria}</Text>
+          <Text style={styles.cardTitle}>{item.name}</Text>
+          {item.category ? (
+            <Text style={styles.cardBadge}>{item.category}</Text>
           ) : null}
         </View>
 
@@ -221,7 +231,11 @@ export default function EquipesListScreen({ navigation }: Props) {
                 style={styles.iconButton}
                 onPress={() => openEditModal(item)}
               >
-                <Ionicons name="create-outline" size={18} color={AppTheme.textSecondary} />
+                <Ionicons
+                  name="create-outline"
+                  size={18}
+                  color={AppTheme.textSecondary}
+                />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -239,7 +253,6 @@ export default function EquipesListScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      {/* Cabeçalho interno (texto) – o título no header vem do Navigator */}
       <View style={styles.pageHeader}>
         <Text style={styles.pageTitle}>Equipes</Text>
         <Text style={styles.pageSubtitle}>
@@ -275,7 +288,6 @@ export default function EquipesListScreen({ navigation }: Props) {
         />
       )}
 
-      {/* Botão flutuante para diretoria/admin */}
       {isDiretoriaOrAdmin && (
         <TouchableOpacity
           style={styles.fab}
@@ -286,7 +298,7 @@ export default function EquipesListScreen({ navigation }: Props) {
         </TouchableOpacity>
       )}
 
-      {/* Modal de criação/edição */}
+      {/* Modal criação/edição */}
       <Modal
         visible={modalVisible}
         transparent
@@ -352,7 +364,7 @@ export default function EquipesListScreen({ navigation }: Props) {
   );
 }
 
-// ==================== ESTILOS ====================
+// ============== ESTILOS ==============
 
 const styles = StyleSheet.create({
   container: {
@@ -449,7 +461,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 4,
   },
-
   fab: {
     position: 'absolute',
     right: 18,

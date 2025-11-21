@@ -3,7 +3,7 @@
 // Evita reconsultar o Supabase em todas as telas.
 
 import { useMemo } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../app/context/AuthContext';
 
 export function usePermissions() {
   const { user } = useAuth();
