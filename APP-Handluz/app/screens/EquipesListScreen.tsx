@@ -15,6 +15,7 @@ import {
   Alert,
   TextInput,
   Modal,
+  Image, // <<=== IMPORT DO IMAGE
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -24,6 +25,9 @@ import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
 import { usePermissions } from '../../hooks/usePermissions';
 import type { EquipesStackParamList } from '../navigation/EquipesStackNavigator';
+
+// logo (arquivo em /assets/images/logo_handluz.png)
+const handluzLogo = require('../../assets/images/logo_handluz.png');
 
 type EquipesNav = NativeStackNavigationProp<EquipesStackParamList>;
 
@@ -53,8 +57,8 @@ export default function EquipesListScreen() {
     setLoading(true);
     try {
       const { data, error } = await supabase
-        .from('teams')               // <<< tabela correta
-        .select('id, name, category') // <<< campos esperados
+        .from('teams')
+        .select('id, name, category')
         .order('name', { ascending: true });
 
       if (error) {
@@ -253,12 +257,9 @@ export default function EquipesListScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Header com logo centralizada */}
       <View style={styles.pageHeader}>
-        <Text style={styles.pageTitle}>Equipes</Text>
-        <Text style={styles.pageSubtitle}>
-          Visualize as equipes do HandLuz e, se for diretoria, gerencie cadastro,
-          edição e exclusão.
-        </Text>
+        <Image source={handluzLogo} style={styles.headerLogo} resizeMode="contain" />
       </View>
 
       {loading && !refreshing ? (
@@ -375,6 +376,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerLogo: {
+    width: 90,
+    height: 90,
   },
   pageTitle: {
     fontSize: 20,

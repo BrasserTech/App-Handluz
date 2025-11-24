@@ -55,7 +55,6 @@ type VacationPeriod = {
 type FieldErrors = {
   title?: string;
   date?: string;
-  repeatUntil?: string;
 };
 
 function toIsoDate(d: Date): string {
@@ -72,6 +71,8 @@ function formatDateLabel(dateStr: string | null): string {
     year: 'numeric',
   });
 }
+
+
 
 function formatTimeLabel(timeStr: string | null): string {
   if (!timeStr) return '';
@@ -90,10 +91,13 @@ function formatDuration(mins: number | null | undefined): string {
 
 // máscara simples: "2200" -> "22:00"
 function maskTime(text: string): string {
-  const digits = text.replace(/\D/g, '').slice(0, 4);
-  if (digits.length <= 2) return digits;
-  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+  const digits = text.replace(/\D/g, '').slice(0, 4); // só números, até 4 dígitos
+
+  if (digits.length === 0) return '';
+  if (digits.length <= 2) return digits;              // "2" → "2", "22" → "22"
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;  // "223" → "22:3", "2230" → "22:30"
 }
+
 
 function isoToDayOfWeek(iso: string): number {
   const d = new Date(iso);
@@ -132,9 +136,7 @@ export default function TreinosListScreen() {
   const [formDurationMinutes, setFormDurationMinutes] = useState('60');
   const [formLocation, setFormLocation] = useState('');
   const [formDescription, setFormDescription] = useState('');
-  const [repeatWeekly, setRepeatWeekly] = useState(false);
-  const [repeatUntilDigits, setRepeatUntilDigits] = useState('');
-  const [repeatUntilDisplay, setRepeatUntilDisplay] = useState('');
+  const [isWeekly, setIsWeekly] = useState(false); // treino semanal?
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   // Modal de férias
@@ -160,15 +162,6 @@ export default function TreinosListScreen() {
     setFormDateDisplay(formatDateDisplayFromDigits(digits));
     if (fieldErrors.date) {
       setFieldErrors(prev => ({ ...prev, date: undefined }));
-    }
-  }
-
-  function handleRepeatUntilDateChange(text: string) {
-    const digits = text.replace(/\D/g, '').slice(0, 8);
-    setRepeatUntilDigits(digits);
-    setRepeatUntilDisplay(formatDateDisplayFromDigits(digits));
-    if (fieldErrors.repeatUntil) {
-      setFieldErrors(prev => ({ ...prev, repeatUntil: undefined }));
     }
   }
 
@@ -262,7 +255,7 @@ export default function TreinosListScreen() {
         return;
       }
 
-      // férias
+      // férias (qualquer período que intersecte o mês atual)
       const { data: vacData, error: vacError } = await supabase
         .from('training_vacations')
         .select('id, team_id, start_date, end_date, notes')
@@ -366,9 +359,7 @@ export default function TreinosListScreen() {
     setFormLocation('');
     setFormStartTime('');
     setFormDurationMinutes('60');
-    setRepeatWeekly(false);
-    setRepeatUntilDigits('');
-    setRepeatUntilDisplay('');
+    setIsWeekly(false);
     setFieldErrors({});
 
     if (dateIso) {
@@ -397,9 +388,7 @@ export default function TreinosListScreen() {
         ? String(training.duration_minutes)
         : '60'
     );
-    setRepeatWeekly(false);
-    setRepeatUntilDigits('');
-    setRepeatUntilDisplay('');
+    setIsWeekly(false); // edição é sempre da ocorrência isolada
     setFieldErrors({});
 
     if (training.training_date) {
@@ -424,16 +413,6 @@ export default function TreinosListScreen() {
     const iso = getDateIsoFromDigits(formDateDigits);
     if (!iso) {
       errors.date = 'Informe uma data válida (dd/mm/aaaa).';
-    }
-
-    if (repeatWeekly && repeatUntilDigits) {
-      const startIso = iso;
-      const endIso = getDateIsoFromDigits(repeatUntilDigits);
-      if (!endIso || !startIso) {
-        errors.repeatUntil = 'Data final inválida.';
-      } else if (new Date(endIso) < new Date(startIso)) {
-        errors.repeatUntil = 'A data final deve ser igual ou posterior à inicial.';
-      }
     }
 
     setFieldErrors(errors);
@@ -477,7 +456,7 @@ export default function TreinosListScreen() {
     setSaving(true);
     try {
       if (!editingTraining) {
-        // novo treino
+        // ================= NOVO TREINO =================
         const inserts: any[] = [];
 
         // ocorrência principal
@@ -486,29 +465,66 @@ export default function TreinosListScreen() {
           status: 'scheduled',
         });
 
-        // recorrência semanal
-        const repeatUntilIso = getDateIsoFromDigits(repeatUntilDigits);
-        if (repeatWeekly && repeatUntilIso) {
-          const start = new Date(isoDate);
-          const end = new Date(repeatUntilIso);
-          const weekday = isoToDayOfWeek(isoDate);
+        // ----------------- RECORRÊNCIA SEMANAL -----------------
+        if (isWeekly) {
+          // busca a próxima férias da equipe a partir dessa data
+          let repeatUntilIso: string | null = null;
 
-          const dateCursor = new Date(start);
-          dateCursor.setDate(dateCursor.getDate() + 1);
+          const { data: vacFuture, error: vacErr } = await supabase
+            .from('training_vacations')
+            .select('start_date')
+            .eq('team_id', selectedTeamId)
+            .gte('start_date', isoDate)
+            .order('start_date', { ascending: true })
+            .limit(1);
 
-          while (dateCursor <= end) {
-            if (dateCursor.getDay() === weekday) {
-              inserts.push({
-                ...basePayload,
-                training_date: toIsoDate(dateCursor),
-                status: 'scheduled',
-              });
-            }
+          if (vacErr) {
+            console.error(
+              '[Treinos] Erro ao buscar férias futuras para recorrência:',
+              vacErr.message
+            );
+          }
+
+          if (vacFuture && vacFuture.length > 0) {
+            // repete até o dia anterior ao início das férias
+            const firstStart = new Date(vacFuture[0].start_date as string);
+            firstStart.setDate(firstStart.getDate() - 1);
+            repeatUntilIso = toIsoDate(firstStart);
+          } else {
+            // se não há férias futuras definidas, limita em +6 meses
+            const limit = new Date(isoDate);
+            limit.setMonth(limit.getMonth() + 6);
+            repeatUntilIso = toIsoDate(limit);
+          }
+
+          if (repeatUntilIso) {
+            const start = new Date(isoDate);
+            const end = new Date(repeatUntilIso);
+            const weekday = isoToDayOfWeek(isoDate);
+
+            const dateCursor = new Date(start);
             dateCursor.setDate(dateCursor.getDate() + 1);
+
+            while (dateCursor <= end) {
+              if (dateCursor.getDay() === weekday) {
+                const iso = toIsoDate(dateCursor);
+                // garante que não entre no período de férias (por segurança)
+                if (!isDateInVacation(iso)) {
+                  inserts.push({
+                    ...basePayload,
+                    training_date: iso,
+                    status: 'scheduled',
+                  });
+                }
+              }
+              dateCursor.setDate(dateCursor.getDate() + 1);
+            }
           }
         }
 
-        const { error } = await supabase.from('trainings').insert(inserts);
+        const { error } = await supabase
+          .from('trainings')
+          .insert(inserts);
 
         if (error) {
           console.error('[Treinos] Erro ao criar treino:', error.message);
@@ -517,7 +533,7 @@ export default function TreinosListScreen() {
           return;
         }
       } else {
-        // edição de treino individual (não altera outros dias)
+        // ================= EDIÇÃO DE TREINO ÚNICO =================
         const { error } = await supabase
           .from('trainings')
           .update(basePayload)
@@ -614,8 +630,16 @@ export default function TreinosListScreen() {
       return;
     }
 
-    const startIso = getDateIsoFromDigits(vacStartDigits);
-    const endIso = getDateIsoFromDigits(vacEndDigits);
+    const getIso = (digits: string): string | null => {
+      if (digits.length !== 8) return null;
+      const d = digits.slice(0, 2);
+      const m = digits.slice(2, 4);
+      const y = digits.slice(4, 8);
+      return `${y}-${m}-${d}`;
+    };
+
+    const startIso = getIso(vacStartDigits);
+    const endIso = getIso(vacEndDigits);
 
     if (!startIso || !endIso) {
       Alert.alert(
@@ -679,10 +703,7 @@ export default function TreinosListScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.pageHeader}>
-        {/* <Text style={styles.pageTitle}>Treinos</Text> */}
-        {/* descrição longa removida conforme solicitado */}
-      </View>
+      <View style={styles.pageHeader} />
 
       {/* Filtro de equipe */}
       <View style={styles.section}>
@@ -1115,42 +1136,17 @@ export default function TreinosListScreen() {
             />
 
             {!editingTraining && (
-              <>
-                <View style={styles.repeatRow}>
-                  <TouchableOpacity
-                    style={styles.checkboxOuter}
-                    onPress={() => setRepeatWeekly(prev => !prev)}
-                  >
-                    {repeatWeekly && <View style={styles.checkboxInner} />}
-                  </TouchableOpacity>
-                  <Text style={styles.repeatLabel}>
-                    Repetir semanalmente
-                  </Text>
-                </View>
-
-                {repeatWeekly && (
-                  <>
-                    <Text style={styles.fieldLabel}>
-                      Repetir até (opcional)
-                    </Text>
-                    <TextInput
-                      style={[
-                        styles.input,
-                        fieldErrors.repeatUntil && styles.inputError,
-                      ]}
-                      value={repeatUntilDisplay}
-                      onChangeText={handleRepeatUntilDateChange}
-                      keyboardType="number-pad"
-                      placeholder="__/__/____"
-                    />
-                    {fieldErrors.repeatUntil && (
-                      <Text style={styles.errorText}>
-                        {fieldErrors.repeatUntil}
-                      </Text>
-                    )}
-                  </>
-                )}
-              </>
+              <View style={styles.repeatRow}>
+                <TouchableOpacity
+                  style={styles.checkboxOuter}
+                  onPress={() => setIsWeekly(prev => !prev)}
+                >
+                  {isWeekly && <View style={styles.checkboxInner} />}
+                </TouchableOpacity>
+                <Text style={styles.repeatLabel}>
+                  Treino semanal (repete toda semana até as férias da equipe)
+                </Text>
+              </View>
             )}
 
             <View style={styles.modalButtonsRow}>
@@ -1610,6 +1606,7 @@ const styles = StyleSheet.create({
     backgroundColor: AppTheme.primary,
   },
   repeatLabel: {
+    flex: 1,
     fontSize: 13,
     color: AppTheme.textPrimary,
   },
