@@ -21,7 +21,19 @@
       "package": "com.paulera_18.apphandluz"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "App Handluz",
+      "shortName": "Handluz",
+      "lang": "pt-BR",
+      "scope": "/",
+      "themeColor": "#1a1a1a",
+      "backgroundColor": "#ffffff",
+      "display": "standalone",
+      "orientation": "portrait",
+      "startUrl": "/",
+      "bundler": "metro",
+      "description": "App oficial do Handebol de Luzerna",
+      "dir": "ltr"
     },
     "extra": {
       "eas": {
