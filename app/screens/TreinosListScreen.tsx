@@ -72,8 +72,6 @@ function formatDateLabel(dateStr: string | null): string {
   });
 }
 
-
-
 function formatTimeLabel(timeStr: string | null): string {
   if (!timeStr) return '';
   const parts = timeStr.split(':');
@@ -97,7 +95,6 @@ function maskTime(text: string): string {
   if (digits.length <= 2) return digits;              // "2" → "2", "22" → "22"
   return `${digits.slice(0, 2)}:${digits.slice(2)}`;  // "223" → "22:3", "2230" → "22:30"
 }
-
 
 function isoToDayOfWeek(iso: string): number {
   const d = new Date(iso);
@@ -342,7 +339,7 @@ export default function TreinosListScreen() {
     if (!list || list.length === 0) return 'none';
 
     const hasScheduled = list.some(t => t.status === 'scheduled');
-    const hasCanceled = list.some(t => t.status === 'canceled');
+       const hasCanceled = list.some(t => t.status === 'canceled');
 
     if (hasScheduled && hasCanceled) return 'mixed';
     if (hasScheduled) return 'scheduled';
@@ -703,330 +700,338 @@ export default function TreinosListScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.pageHeader} />
+      {/* Scroll vertical envolvendo tela inteira */}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.pageHeader} />
 
-      {/* Filtro de equipe */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Selecione uma equipe</Text>
-        {teamsLoading ? (
-          <ActivityIndicator size="small" color={AppTheme.primary} />
-        ) : (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.teamChipsRow}
-          >
-            {teams.map(team => {
-              const isSelected = team.id === selectedTeamId;
-              return (
-                <TouchableOpacity
-                  key={team.id}
-                  style={[
-                    styles.teamChip,
-                    isSelected && styles.teamChipSelected,
-                  ]}
-                  onPress={() => {
-                    setSelectedTeamId(team.id);
-                    setSelectedDate(null);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.teamChipText,
-                      isSelected && styles.teamChipTextSelected,
-                    ]}
-                  >
-                    {team.name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        )}
-      </View>
-
-      {/* Cabeçalho do mês + férias */}
-      <View style={[styles.section, styles.monthHeaderRow]}>
-        <TouchableOpacity
-          onPress={() =>
-            setCurrentMonth(prev => {
-              const y = prev.getFullYear();
-              const m = prev.getMonth();
-              return new Date(y, m - 1, 1);
-            })
-          }
-        >
-          <Ionicons
-            name="chevron-back"
-            size={22}
-            color={AppTheme.textPrimary}
-          />
-        </TouchableOpacity>
-
-        <Text style={styles.monthTitle}>
-          {currentMonth.toLocaleDateString('pt-BR', {
-            month: 'long',
-            year: 'numeric',
-          })}
-        </Text>
-
-        <View style={styles.monthActions}>
-          {isDiretoriaOrAdmin && (
-            <TouchableOpacity
-              style={styles.vacationButton}
-              onPress={openVacationModal}
+        {/* Filtro de equipe */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Selecione uma equipe</Text>
+          {teamsLoading ? (
+            <ActivityIndicator size="small" color={AppTheme.primary} />
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.teamChipsRow}
             >
-              <Ionicons
-                name="umbrella-outline"
-                size={16}
-                color={AppTheme.primary}
-              />
-              <Text style={styles.vacationButtonText}>Férias</Text>
-            </TouchableOpacity>
+              {teams.map(team => {
+                const isSelected = team.id === selectedTeamId;
+                return (
+                  <TouchableOpacity
+                    key={team.id}
+                    style={[
+                      styles.teamChip,
+                      isSelected && styles.teamChipSelected,
+                    ]}
+                    onPress={() => {
+                      setSelectedTeamId(team.id);
+                      setSelectedDate(null);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.teamChipText,
+                        isSelected && styles.teamChipTextSelected,
+                      ]}
+                    >
+                      {team.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           )}
+        </View>
+
+        {/* Cabeçalho do mês + férias */}
+        <View style={[styles.section, styles.monthHeaderRow]}>
           <TouchableOpacity
             onPress={() =>
               setCurrentMonth(prev => {
                 const y = prev.getFullYear();
                 const m = prev.getMonth();
-                return new Date(y, m + 1, 1);
+                return new Date(y, m - 1, 1);
               })
             }
           >
             <Ionicons
-              name="chevron-forward"
+              name="chevron-back"
               size={22}
               color={AppTheme.textPrimary}
             />
           </TouchableOpacity>
-        </View>
-      </View>
 
-      {currentVacationsText ? (
-        <View style={styles.vacationInfo}>
-          <Ionicons
-            name="information-circle-outline"
-            size={16}
-            color={AppTheme.textSecondary}
-            style={{ marginRight: 4 }}
-          />
-          <Text style={styles.vacationInfoText}>
-            Períodos de férias: {currentVacationsText}
+          <Text style={styles.monthTitle}>
+            {currentMonth.toLocaleDateString('pt-BR', {
+              month: 'long',
+              year: 'numeric',
+            })}
           </Text>
-        </View>
-      ) : null}
 
-      {/* Calendário */}
-      <View style={styles.calendarWrapper}>
-        <View style={styles.calendarWeekRow}>
-          {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map(d => (
-            <Text key={d} style={styles.calendarWeekday}>
-              {d}
-            </Text>
-          ))}
-        </View>
-
-        {calendarLoading && (
-          <View style={styles.calendarLoading}>
-            <ActivityIndicator size="small" color={AppTheme.primary} />
-          </View>
-        )}
-
-        <View style={styles.calendarGrid}>
-          {calendarDays.map((cell, index) => {
-            const isToday =
-              cell.iso && cell.iso === toIsoDate(new Date());
-            const isSelected = cell.iso && cell.iso === selectedDate;
-            const status = getDayStatus(cell.iso);
-
-            let dayStyle: ViewStyle = { ...styles.calendarDay };
-            let dayTextStyle: TextStyle = { ...styles.calendarDayText };
-
-            if (status === 'scheduled' || status === 'mixed') {
-              dayStyle = {
-                ...dayStyle,
-                backgroundColor: '#E8F3EC',
-              };
-              dayTextStyle = {
-                ...dayTextStyle,
-                color: AppTheme.primary,
-              };
-            } else if (status === 'canceled') {
-              dayStyle = {
-                ...dayStyle,
-                backgroundColor: '#FFEBEE',
-              };
-              dayTextStyle = {
-                ...dayTextStyle,
-                color: '#C62828',
-              };
-            } else if (status === 'vacation') {
-              dayStyle = {
-                ...dayStyle,
-                backgroundColor: '#ECEFF1',
-              };
-              dayTextStyle = {
-                ...dayTextStyle,
-                color: AppTheme.textMuted,
-              };
-            }
-
-            if (isSelected) {
-              dayStyle = {
-                ...dayStyle,
-                borderColor: AppTheme.primaryDark,
-                borderWidth: 2,
-              };
-            } else if (isToday) {
-              dayStyle = {
-                ...dayStyle,
-                borderColor: AppTheme.primary,
-                borderWidth: 1.5,
-              };
-            }
-
-            return (
+          <View style={styles.monthActions}>
+            {isDiretoriaOrAdmin && (
               <TouchableOpacity
-                key={index}
-                style={styles.calendarCell}
-                activeOpacity={cell.date ? 0.8 : 1}
-                onPress={() => {
-                  if (cell.iso) setSelectedDate(cell.iso);
-                }}
+                style={styles.vacationButton}
+                onPress={openVacationModal}
               >
-                {cell.date && (
-                  <View style={dayStyle}>
-                    <Text style={dayTextStyle}>
-                      {cell.date.getDate()}
-                    </Text>
-                  </View>
-                )}
+                <Ionicons
+                  name="umbrella-outline"
+                  size={16}
+                  color={AppTheme.primary}
+                />
+                <Text style={styles.vacationButtonText}>Férias</Text>
               </TouchableOpacity>
-            );
-          })}
-        </View>
-      </View>
-
-      {/* Lista de treinos */}
-      <View style={styles.sectionListWrapper}>
-        <View style={styles.sectionListHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>Treinos do dia</Text>
-            <Text style={styles.sectionSubLabel}>
-              {selectedDate
-                ? formatDateLabel(selectedDate)
-                : 'Nenhum dia selecionado'}
-            </Text>
+            )}
+            <TouchableOpacity
+              onPress={() =>
+                setCurrentMonth(prev => {
+                  const y = prev.getFullYear();
+                  const m = prev.getMonth();
+                  return new Date(y, m + 1, 1);
+                })
+              }
+            >
+              <Ionicons
+                name="chevron-forward"
+                size={22}
+                color={AppTheme.textPrimary}
+              />
+            </TouchableOpacity>
           </View>
         </View>
 
-        {selectedDate && selectedDayTrainings.length === 0 && (
-          <View style={styles.emptyListContainer}>
-            <Text style={styles.emptyListText}>
-              Nenhum treino cadastrado para este dia.
+        {currentVacationsText ? (
+          <View style={styles.vacationInfo}>
+            <Ionicons
+              name="information-circle-outline"
+              size={16}
+              color={AppTheme.textSecondary}
+              style={{ marginRight: 4 }}
+            />
+            <Text style={styles.vacationInfoText}>
+              Períodos de férias: {currentVacationsText}
             </Text>
           </View>
-        )}
+        ) : null}
 
-        {selectedDate && selectedDayTrainings.length > 0 && (
-          <FlatList
-            data={selectedDayTrainings}
-            keyExtractor={item => item.id}
-            contentContainerStyle={{ paddingBottom: 80 }}
-            renderItem={({ item }) => {
-              const isCanceled = item.status === 'canceled';
+        {/* Calendário */}
+        <View style={styles.calendarWrapper}>
+          <View style={styles.calendarWeekRow}>
+            {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map(d => (
+              <Text key={d} style={styles.calendarWeekday}>
+                {d}
+              </Text>
+            ))}
+          </View>
+
+          {calendarLoading && (
+            <View style={styles.calendarLoading}>
+              <ActivityIndicator size="small" color={AppTheme.primary} />
+            </View>
+          )}
+
+          <View style={styles.calendarGrid}>
+            {calendarDays.map((cell, index) => {
+              const isToday =
+                cell.iso && cell.iso === toIsoDate(new Date());
+              const isSelected = cell.iso && cell.iso === selectedDate;
+              const status = getDayStatus(cell.iso);
+
+              let dayStyle: ViewStyle = { ...styles.calendarDay };
+              let dayTextStyle: TextStyle = { ...styles.calendarDayText };
+
+              if (status === 'scheduled' || status === 'mixed') {
+                dayStyle = {
+                  ...dayStyle,
+                  backgroundColor: '#E8F3EC',
+                };
+                dayTextStyle = {
+                  ...dayTextStyle,
+                  color: AppTheme.primary,
+                };
+              } else if (status === 'canceled') {
+                dayStyle = {
+                  ...dayStyle,
+                  backgroundColor: '#FFEBEE',
+                };
+                dayTextStyle = {
+                  ...dayTextStyle,
+                  color: '#C62828',
+                };
+              } else if (status === 'vacation') {
+                dayStyle = {
+                  ...dayStyle,
+                  backgroundColor: '#ECEFF1',
+                };
+                dayTextStyle = {
+                  ...dayTextStyle,
+                  color: AppTheme.textMuted,
+                };
+              }
+
+              if (isSelected) {
+                dayStyle = {
+                  ...dayStyle,
+                  borderColor: AppTheme.primaryDark,
+                  borderWidth: 2,
+                };
+              } else if (isToday) {
+                dayStyle = {
+                  ...dayStyle,
+                  borderColor: AppTheme.primary,
+                  borderWidth: 1.5,
+                };
+              }
+
               return (
-                <View style={styles.trainingCard}>
-                  <View style={styles.trainingHeaderRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.trainingTitle}>
-                        {item.title}
+                <TouchableOpacity
+                  key={index}
+                  style={styles.calendarCell}
+                  activeOpacity={cell.date ? 0.8 : 1}
+                  onPress={() => {
+                    if (cell.iso) setSelectedDate(cell.iso);
+                  }}
+                >
+                  {cell.date && (
+                    <View style={dayStyle}>
+                      <Text style={dayTextStyle}>
+                        {cell.date.getDate()}
                       </Text>
-                      {item.location ? (
-                        <Text style={styles.trainingLocation}>
-                          {item.location}
-                        </Text>
-                      ) : null}
-                    </View>
-
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        isCanceled
-                          ? styles.statusBadgeCanceled
-                          : styles.statusBadgeScheduled,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.statusBadgeText,
-                          isCanceled
-                            ? styles.statusBadgeTextCanceled
-                            : styles.statusBadgeTextScheduled,
-                        ]}
-                      >
-                        {isCanceled ? 'Cancelado' : 'Confirmado'}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.trainingInfoRow}>
-                    <Ionicons
-                      name="time-outline"
-                      size={14}
-                      color={AppTheme.textSecondary}
-                      style={{ marginRight: 4 }}
-                    />
-                    <Text style={styles.trainingInfoText}>
-                      {item.start_time
-                        ? `${formatTimeLabel(item.start_time)} • ${formatDuration(
-                            item.duration_minutes
-                          )}`
-                        : `Duração: ${formatDuration(
-                            item.duration_minutes
-                          )}`}
-                    </Text>
-                  </View>
-
-                  {item.description ? (
-                    <Text style={styles.trainingDescription}>
-                      {item.description}
-                    </Text>
-                  ) : null}
-
-                  {isDiretoriaOrAdmin && (
-                    <View style={styles.trainingActionsRow}>
-                      <TouchableOpacity
-                        style={styles.iconButton}
-                        onPress={() => openEditTrainingModal(item)}
-                      >
-                        <Ionicons
-                          name="create-outline"
-                          size={18}
-                          color={AppTheme.textSecondary}
-                        />
-                      </TouchableOpacity>
-
-                      {!isCanceled && (
-                        <TouchableOpacity
-                          style={styles.iconButton}
-                          onPress={() => handleCancelTraining(item)}
-                        >
-                          <Ionicons
-                            name="close-circle-outline"
-                            size={20}
-                            color="#C62828"
-                          />
-                        </TouchableOpacity>
-                      )}
                     </View>
                   )}
-                </View>
+                </TouchableOpacity>
               );
-            }}
-          />
-        )}
-      </View>
+            })}
+          </View>
+        </View>
+
+        {/* Lista de treinos */}
+        <View style={styles.sectionListWrapper}>
+          <View style={styles.sectionListHeader}>
+            <View>
+              <Text style={styles.sectionTitle}>Treinos do dia</Text>
+              <Text style={styles.sectionSubLabel}>
+                {selectedDate
+                  ? formatDateLabel(selectedDate)
+                  : 'Nenhum dia selecionado'}
+              </Text>
+            </View>
+          </View>
+
+          {selectedDate && selectedDayTrainings.length === 0 && (
+            <View style={styles.emptyListContainer}>
+              <Text style={styles.emptyListText}>
+                Nenhum treino cadastrado para este dia.
+              </Text>
+            </View>
+          )}
+
+          {selectedDate && selectedDayTrainings.length > 0 && (
+            <FlatList
+              data={selectedDayTrainings}
+              keyExtractor={item => item.id}
+              scrollEnabled={false}               // desabilita scroll interno
+              contentContainerStyle={{ paddingBottom: 8 }}
+              renderItem={({ item }) => {
+                const isCanceled = item.status === 'canceled';
+                return (
+                  <View style={styles.trainingCard}>
+                    <View style={styles.trainingHeaderRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.trainingTitle}>
+                          {item.title}
+                        </Text>
+                        {item.location ? (
+                          <Text style={styles.trainingLocation}>
+                            {item.location}
+                          </Text>
+                        ) : null}
+                      </View>
+
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          isCanceled
+                            ? styles.statusBadgeCanceled
+                            : styles.statusBadgeScheduled,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.statusBadgeText,
+                            isCanceled
+                              ? styles.statusBadgeTextCanceled
+                              : styles.statusBadgeTextScheduled,
+                          ]}
+                        >
+                          {isCanceled ? 'Cancelado' : 'Confirmado'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.trainingInfoRow}>
+                      <Ionicons
+                        name="time-outline"
+                        size={14}
+                        color={AppTheme.textSecondary}
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text style={styles.trainingInfoText}>
+                        {item.start_time
+                          ? `${formatTimeLabel(item.start_time)} • ${formatDuration(
+                              item.duration_minutes
+                            )}`
+                          : `Duração: ${formatDuration(
+                              item.duration_minutes
+                            )}`}
+                      </Text>
+                    </View>
+
+                    {item.description ? (
+                      <Text style={styles.trainingDescription}>
+                        {item.description}
+                      </Text>
+                    ) : null}
+
+                    {isDiretoriaOrAdmin && (
+                      <View style={styles.trainingActionsRow}>
+                        <TouchableOpacity
+                          style={styles.iconButton}
+                          onPress={() => openEditTrainingModal(item)}
+                        >
+                          <Ionicons
+                            name="create-outline"
+                            size={18}
+                            color={AppTheme.textSecondary}
+                          />
+                        </TouchableOpacity>
+
+                        {!isCanceled && (
+                          <TouchableOpacity
+                            style={styles.iconButton}
+                            onPress={() => handleCancelTraining(item)}
+                          >
+                            <Ionicons
+                              name="close-circle-outline"
+                              size={20}
+                              color="#C62828"
+                            />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                );
+              }}
+            />
+          )}
+        </View>
+      </ScrollView>
 
       {/* FAB – apenas diretoria/admin */}
       {isDiretoriaOrAdmin && selectedTeamId && (
@@ -1258,6 +1263,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: AppTheme.background,
   },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 96, // espaço para FAB e aba inferior
+  },
   pageHeader: {
     paddingHorizontal: 16,
     paddingTop: 12,
@@ -1398,7 +1409,6 @@ const styles = StyleSheet.create({
     color: AppTheme.textPrimary,
   },
   sectionListWrapper: {
-    flex: 1,
     paddingHorizontal: 16,
     paddingTop: 10,
   },

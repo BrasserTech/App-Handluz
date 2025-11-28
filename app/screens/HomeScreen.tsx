@@ -17,8 +17,44 @@ import { Ionicons } from '@expo/vector-icons';
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
 
-// IMPORT DA LOGO (arquivo em app/assets/images/logo_handluz.png)
+// LOGO (ajuste o caminho conforme seu projeto)
 const handluzLogo = require('../../assets/images/logo_handluz.png');
+
+// Configuração do feed de Instagram via backend próprio
+// O backend deve expor um endpoint que retorne JSON no formato:
+// [{ id, imageUrl, caption, permalink, takenAt }, ...]
+const INSTAGRAM_CONFIG = {
+  feedEndpoint: 'https://seu-servidor.com/instagram-feed', // troque pelo seu endpoint real
+};
+
+// Tipo das postagens de Instagram exibidas no app
+type InstagramPost = {
+  id: string;
+  imageUrl: string;
+  caption: string;
+  permalink?: string | null;
+  takenAt?: string | null; // ISO date
+};
+
+// Lista mockada para uso enquanto o backend não estiver pronto
+const MOCK_INSTAGRAM_POSTS: InstagramPost[] = [
+  {
+    id: '1',
+    imageUrl:
+      'https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&w=800&q=80',
+    caption: 'Treino da equipe adulta em preparação para a temporada 2025.',
+    permalink: undefined,
+    takenAt: '2025-03-10',
+  },
+  {
+    id: '2',
+    imageUrl:
+      'https://images.unsplash.com/photo-1559703248-dcaaec9fab78?auto=format&fit=crop&w=800&q=80',
+    caption: 'Categorias de base iniciando o ciclo de formação no HandLuz.',
+    permalink: undefined,
+    takenAt: '2025-03-05',
+  },
+];
 
 type Team = {
   id: string;
@@ -83,8 +119,13 @@ export default function HomeScreen() {
 
   const [loading, setLoading] = useState<boolean>(false);
 
+  // Estado do feed do Instagram
+  const [instagramPosts, setInstagramPosts] = useState<InstagramPost[]>([]);
+  const [instagramLoading, setInstagramLoading] = useState<boolean>(false);
+
   useEffect(() => {
     loadHomeData();
+    loadInstagramFeed();
   }, []);
 
   async function loadHomeData() {
@@ -113,7 +154,6 @@ export default function HomeScreen() {
           .select('id', { count: 'exact', head: true })
           .gte('training_date', monthStartIso)
           .lte('training_date', monthEndIso),
-        // competições futuras ou em andamento
         supabase
           .from('competitions')
           .select(
@@ -121,7 +161,6 @@ export default function HomeScreen() {
           )
           .or(`start_date.gte.${todayIso},end_date.gte.${todayIso}`)
           .order('start_date', { ascending: true }),
-        // próximos jogos (a partir de hoje)
         supabase
           .from('matches')
           .select(
@@ -154,21 +193,61 @@ export default function HomeScreen() {
       });
 
       setCompetitions((compsData ?? []) as Competition[]);
-      
-      // Ordenar matches por data e depois por hora
-      const sortedMatches = (matchesData ?? []).sort((a, b) => {
-        if (a.match_date !== b.match_date) {
-          return a.match_date.localeCompare(b.match_date);
-        }
-        return (a.match_time || '').localeCompare(b.match_time || '');
-      }).slice(0, 5) as Match[];
-      
+
+      const sortedMatches = (matchesData ?? [])
+        .sort((a, b) => {
+          if (a.match_date !== b.match_date) {
+            return (a.match_date || '').localeCompare(b.match_date || '');
+          }
+          return (a.match_time || '').localeCompare(b.match_time || '');
+        })
+        .slice(0, 5) as Match[];
+
       setMatches(sortedMatches);
     } catch (err) {
       console.error('[Home] Erro inesperado:', err);
       Alert.alert('Erro', 'Ocorreu um erro inesperado ao carregar os dados.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadInstagramFeed() {
+    setInstagramLoading(true);
+    try {
+      if (!INSTAGRAM_CONFIG.feedEndpoint) {
+        // se não houver endpoint configurado, usa mock
+        setInstagramPosts(MOCK_INSTAGRAM_POSTS);
+        setInstagramLoading(false);
+        return;
+      }
+
+      const response = await fetch(INSTAGRAM_CONFIG.feedEndpoint);
+      if (!response.ok) {
+        console.warn('[Home] Endpoint de Instagram retornou erro HTTP, usando mock.');
+        setInstagramPosts(MOCK_INSTAGRAM_POSTS);
+        setInstagramLoading(false);
+        return;
+      }
+
+      const json = await response.json();
+      // espera-se que venha algo como { data: InstagramPost[] } ou um array direto
+      const posts: InstagramPost[] = Array.isArray(json)
+        ? json
+        : Array.isArray(json.data)
+        ? json.data
+        : [];
+
+      if (posts.length === 0) {
+        setInstagramPosts(MOCK_INSTAGRAM_POSTS);
+      } else {
+        setInstagramPosts(posts);
+      }
+    } catch (err) {
+      console.error('[Home] Erro ao carregar feed do Instagram, usando mock:', err);
+      setInstagramPosts(MOCK_INSTAGRAM_POSTS);
+    } finally {
+      setInstagramLoading(false);
     }
   }
 
@@ -187,12 +266,24 @@ export default function HomeScreen() {
     }
   }
 
+  function formatInstagramDate(iso?: string | null): string {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+  }
+
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={{ paddingBottom: 40 }}
+      showsVerticalScrollIndicator={false}
     >
-      {/* Card Principal / Logo / Resumo */}
+      {/* Card Principal / Logo / Apresentação / Resumo */}
       <View style={styles.eventCard}>
         <View style={styles.eventHeader}>
           <View style={{ flex: 1 }}>
@@ -228,6 +319,18 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        <View style={styles.introWrapper}>
+          <Text style={styles.introTitle}>
+            Clube HandLuz – Formação em Handebol
+          </Text>
+          <Text style={styles.introText}>
+            O HandLuz é o clube de handebol da cidade de Luzerna/SC, voltado à
+            formação esportiva de crianças, jovens e adultos. Este aplicativo
+            acompanha treinos, equipes, competições e notícias oficiais do
+            projeto, aproximando atletas, famílias e comunidade.
+          </Text>
+        </View>
+
         <View style={styles.statsRow}>
           {loading ? (
             <ActivityIndicator size="small" color={AppTheme.primary} />
@@ -250,7 +353,7 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Modalidades / Categorias – baseado nas equipes cadastradas */}
+      {/* Modalidades / Categorias */}
       <Text style={styles.sectionTitle}>MODALIDADES / CATEGORIAS</Text>
       {loading && teams.length === 0 ? (
         <ActivityIndicator
@@ -274,7 +377,62 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* Última notícia – por enquanto estática, futuramente virá da API/Instagram */}
+      {/* Feed do Instagram dentro do app */}
+      <Text style={[styles.sectionTitle, { marginTop: 20 }]}>
+        FEED DO INSTAGRAM
+      </Text>
+      <View style={styles.instagramCard}>
+        {instagramLoading ? (
+          <ActivityIndicator size="small" color={AppTheme.primary} />
+        ) : instagramPosts.length === 0 ? (
+          <Text style={styles.emptyText}>
+            Nenhuma publicação disponível no momento.
+          </Text>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.instagramScrollContent}
+          >
+            {instagramPosts.map(post => (
+              <TouchableOpacity
+                key={post.id}
+                style={styles.instagramPostCard}
+                activeOpacity={post.permalink ? 0.8 : 1}
+                onPress={() => {
+                  if (post.permalink) {
+                    handleOpenUrl(post.permalink);
+                  }
+                }}
+              >
+                <Image
+                  source={{ uri: post.imageUrl }}
+                  style={styles.instagramImage}
+                />
+                <View style={styles.instagramPostBody}>
+                  <Text
+                    numberOfLines={2}
+                    style={styles.instagramCaption}
+                  >
+                    {post.caption}
+                  </Text>
+                  {post.takenAt ? (
+                    <Text style={styles.instagramDate}>
+                      {formatInstagramDate(post.takenAt)}
+                    </Text>
+                  ) : null}
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+        <Text style={styles.instagramHint}>
+          As postagens são sincronizadas a partir de um serviço próprio que
+          consome a API oficial do Instagram.
+        </Text>
+      </View>
+
+      {/* Última notícia (estática por enquanto) */}
       <Text style={[styles.sectionTitle, { marginTop: 20 }]}>
         ÚLTIMA NOTÍCIA
       </Text>
@@ -289,9 +447,8 @@ export default function HomeScreen() {
           Preparativos para a temporada 2025!
         </Text>
         <Text style={styles.newsExcerpt}>
-          Em breve, esta área será alimentada automaticamente com as
-          últimas publicações do Instagram oficial do HandLuz. Por
-          enquanto, mantemos uma notícia fixa para demonstração.
+          Em breve, esta área poderá destacar notícias específicas do
+          calendário do HandLuz, complementando as informações do feed.
         </Text>
         <Text style={styles.newsDate}>10 de março, 15:26</Text>
       </View>
@@ -345,7 +502,7 @@ export default function HomeScreen() {
         ))
       )}
 
-      {/* Próximos jogos – com link de transmissão quando houver */}
+      {/* Próximos jogos */}
       <Text style={[styles.sectionTitle, { marginTop: 20 }]}>
         PRÓXIMOS JOGOS
       </Text>
@@ -467,6 +624,20 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
   },
+  introWrapper: {
+    marginTop: 12,
+  },
+  introTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: AppTheme.textPrimary,
+    marginBottom: 4,
+  },
+  introText: {
+    fontSize: 12,
+    color: AppTheme.textSecondary,
+    lineHeight: 18,
+  },
   statsRow: {
     flexDirection: 'row',
     marginTop: 16,
@@ -515,6 +686,46 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 12,
     textAlign: 'center',
+  },
+  instagramCard: {
+    backgroundColor: AppTheme.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+    padding: 12,
+  },
+  instagramScrollContent: {
+    gap: 10,
+  },
+  instagramPostCard: {
+    width: 220,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+  },
+  instagramImage: {
+    width: '100%',
+    height: 140,
+  },
+  instagramPostBody: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  instagramCaption: {
+    fontSize: 12,
+    color: AppTheme.textPrimary,
+  },
+  instagramDate: {
+    fontSize: 11,
+    color: AppTheme.textSecondary,
+    marginTop: 4,
+  },
+  instagramHint: {
+    marginTop: 8,
+    fontSize: 11,
+    color: AppTheme.textMuted,
   },
   newsCard: {
     backgroundColor: AppTheme.surface,

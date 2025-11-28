@@ -1,7 +1,6 @@
 // app/screens/EquipesListScreen.tsx
-// Listagem de equipes (tabela public.teams).
-// Diretoria/Admin: pode criar, editar e excluir.
-// Usuário comum: apenas visualiza e acessa atletas da equipe.
+// Listagem de equipes (tabela public.teams) e, na aba Diretoria,
+// listagem de membros da diretoria (profiles com role = 'diretoria' ou 'admin').
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -15,7 +14,7 @@ import {
   Alert,
   TextInput,
   Modal,
-  Image, // <<=== IMPORT DO IMAGE
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -37,19 +36,47 @@ type Equipe = {
   category: string | null;
 };
 
+type RoleValue = 'usuario' | 'diretoria' | 'admin';
+
+type BoardMember = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  role: RoleValue | null;
+  board_role: string | null;
+};
+
+type ViewMode = 'times' | 'diretoria';
+
 export default function EquipesListScreen() {
   const { isDiretoriaOrAdmin } = usePermissions();
   const navigation = useNavigation<EquipesNav>();
 
+  // Times
   const [equipes, setEquipes] = useState<Equipe[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
+  // Diretoria
+  const [boardMembers, setBoardMembers] = useState<BoardMember[]>([]);
+  const [boardLoading, setBoardLoading] = useState<boolean>(false);
+  const [boardRefreshing, setBoardRefreshing] = useState<boolean>(false);
+
+  // Modal criação/edição de equipe
   const [modalVisible, setModalVisible] = useState<boolean>(false);
   const [editingEquipe, setEditingEquipe] = useState<Equipe | null>(null);
   const [formNome, setFormNome] = useState<string>('');
   const [formCategoria, setFormCategoria] = useState<string>('');
   const [saving, setSaving] = useState<boolean>(false);
+
+  // Modal edição de função na diretoria
+  const [boardModalVisible, setBoardModalVisible] = useState<boolean>(false);
+  const [editingBoardMember, setEditingBoardMember] = useState<BoardMember | null>(null);
+  const [boardRoleInput, setBoardRoleInput] = useState<string>('');
+  const [savingBoardRole, setSavingBoardRole] = useState<boolean>(false);
+
+  // aba selecionada (Times / Diretoria)
+  const [viewMode, setViewMode] = useState<ViewMode>('times');
 
   // ===================== CARREGAR EQUIPES =====================
 
@@ -84,7 +111,50 @@ export default function EquipesListScreen() {
     setRefreshing(false);
   }
 
-  // ===================== CRUD (DIRETORIA/ADMIN) =====================
+  // ===================== CARREGAR DIRETORIA =====================
+
+  const loadBoardMembers = useCallback(async () => {
+    setBoardLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, email, role, board_role')
+        .in('role', ['diretoria', 'admin'])
+        .order('full_name', { ascending: true });
+
+      if (error) {
+        console.error('[EquipesListScreen] Erro ao carregar diretoria:', error.message);
+        return;
+      }
+
+      setBoardMembers((data ?? []) as BoardMember[]);
+    } catch (err) {
+      console.error('[EquipesListScreen] Erro inesperado ao carregar diretoria:', err);
+    } finally {
+      setBoardLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (viewMode === 'diretoria') {
+      loadBoardMembers();
+    }
+  }, [viewMode, loadBoardMembers]);
+
+  async function handleBoardRefresh() {
+    setBoardRefreshing(true);
+    await loadBoardMembers();
+    setBoardRefreshing(false);
+  }
+
+  function getRoleLabel(role: RoleValue | null) {
+    if (!role) return '—';
+    if (role === 'diretoria') return 'Diretoria';
+    if (role === 'admin') return 'Admin HandLuz';
+    return 'Usuário / Atleta';
+  }
+
+  // ===================== CRUD EQUIPES (DIRETORIA/ADMIN) =====================
 
   function openCreateModal() {
     setEditingEquipe(null);
@@ -194,6 +264,52 @@ export default function EquipesListScreen() {
     );
   }
 
+  // ===================== EDIÇÃO DE FUNÇÃO (DIRETORIA) =====================
+
+  function openBoardRoleModal(member: BoardMember) {
+    setEditingBoardMember(member);
+    setBoardRoleInput(member.board_role ?? '');
+    setBoardModalVisible(true);
+  }
+
+  async function handleSaveBoardRole() {
+    if (!editingBoardMember) return;
+
+    setSavingBoardRole(true);
+
+    try {
+      const newBoardRole = boardRoleInput.trim() || null;
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({ board_role: newBoardRole })
+        .eq('id', editingBoardMember.id);
+
+      if (error) {
+        console.error(
+          '[EquipesListScreen] Erro ao salvar função na diretoria:',
+          error.message
+        );
+        Alert.alert('Erro', 'Não foi possível salvar a função deste membro.');
+        return;
+      }
+
+      setBoardModalVisible(false);
+      setEditingBoardMember(null);
+      setBoardRoleInput('');
+
+      await loadBoardMembers();
+    } catch (err) {
+      console.error(
+        '[EquipesListScreen] Erro inesperado ao salvar função na diretoria:',
+        err
+      );
+      Alert.alert('Erro', 'Ocorreu um erro inesperado ao salvar a função.');
+    } finally {
+      setSavingBoardRole(false);
+    }
+  }
+
   // ===================== NAVEGAÇÃO PARA ATLETAS =====================
 
   function handleOpenAtletas(equipe: Equipe) {
@@ -203,9 +319,9 @@ export default function EquipesListScreen() {
     });
   }
 
-  // ===================== RENDER =====================
+  // ===================== RENDER TIMES =====================
 
-  function renderItem({ item }: { item: Equipe }) {
+  function renderEquipe({ item }: { item: Equipe }) {
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
@@ -255,6 +371,52 @@ export default function EquipesListScreen() {
     );
   }
 
+  // ===================== RENDER DIRETORIA =====================
+
+  function renderBoardMember({ item }: { item: BoardMember }) {
+    return (
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle}>
+              {item.full_name || 'Nome não informado'}
+            </Text>
+            <Text style={styles.cardLineSmall}>{item.email ?? '—'}</Text>
+          </View>
+          <Text style={styles.cardBadge}>{getRoleLabel(item.role)}</Text>
+        </View>
+
+        <View style={styles.cardFooter}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardLine}>
+              Função na diretoria:{' '}
+              {item.board_role && item.board_role.trim().length > 0
+                ? item.board_role
+                : 'Não informada'}
+            </Text>
+          </View>
+
+          {isDiretoriaOrAdmin && (
+            <TouchableOpacity
+              style={styles.editRoleButton}
+              onPress={() => openBoardRoleModal(item)}
+            >
+              <Ionicons
+                name="create-outline"
+                size={16}
+                color={AppTheme.primary}
+                style={{ marginRight: 4 }}
+              />
+              <Text style={styles.editRoleButtonText}>Editar função</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  // ===================== JSX =====================
+
   return (
     <View style={styles.container}>
       {/* Header com logo centralizada */}
@@ -262,34 +424,122 @@ export default function EquipesListScreen() {
         <Image source={handluzLogo} style={styles.headerLogo} resizeMode="contain" />
       </View>
 
-      {loading && !refreshing ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={AppTheme.primary} />
-        </View>
-      ) : (
-        <FlatList
-          data={equipes}
-          keyExtractor={item => item.id}
-          contentContainerStyle={
-            equipes.length === 0 ? styles.emptyListContent : styles.listContent
-          }
-          renderItem={renderItem}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={AppTheme.primary}
+      {/* Filtro superior: Times / Diretoria (abaixo do logo) */}
+      <View style={styles.segmentContainer}>
+        <TouchableOpacity
+          style={[
+            styles.segmentButton,
+            viewMode === 'times' && styles.segmentButtonActive,
+          ]}
+          onPress={() => setViewMode('times')}
+          activeOpacity={0.85}
+        >
+          <Ionicons
+            name="people-outline"
+            size={16}
+            color={viewMode === 'times' ? '#FFF' : AppTheme.textSecondary}
+            style={{ marginRight: 6 }}
+          />
+          <Text
+            style={[
+              styles.segmentButtonText,
+              viewMode === 'times' && styles.segmentButtonTextActive,
+            ]}
+          >
+            Times
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.segmentButton,
+            viewMode === 'diretoria' && styles.segmentButtonActive,
+          ]}
+          onPress={() => setViewMode('diretoria')}
+          activeOpacity={0.85}
+        >
+          <Ionicons
+            name="ribbon-outline"
+            size={16}
+            color={viewMode === 'diretoria' ? '#FFF' : AppTheme.textSecondary}
+            style={{ marginRight: 6 }}
+          />
+          <Text
+            style={[
+              styles.segmentButtonText,
+              viewMode === 'diretoria' && styles.segmentButtonTextActive,
+            ]}
+          >
+            Diretoria
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Conteúdo de cada aba */}
+      {viewMode === 'times' ? (
+        <>
+          {loading && !refreshing ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={AppTheme.primary} />
+            </View>
+          ) : (
+            <FlatList
+              data={equipes}
+              keyExtractor={item => item.id}
+              contentContainerStyle={
+                equipes.length === 0 ? styles.emptyListContent : styles.listContent
+              }
+              renderItem={renderEquipe}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={handleRefresh}
+                  tintColor={AppTheme.primary}
+                />
+              }
+              ListEmptyComponent={
+                <Text style={styles.emptyText}>
+                  Nenhuma equipe cadastrada até o momento.
+                </Text>
+              }
             />
-          }
-          ListEmptyComponent={
-            <Text style={styles.emptyText}>
-              Nenhuma equipe cadastrada até o momento.
-            </Text>
-          }
-        />
+          )}
+        </>
+      ) : (
+        <>
+          {boardLoading && !boardRefreshing ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={AppTheme.primary} />
+            </View>
+          ) : (
+            <FlatList
+              data={boardMembers}
+              keyExtractor={item => item.id}
+              contentContainerStyle={
+                boardMembers.length === 0
+                  ? styles.emptyListContent
+                  : styles.listContent
+              }
+              renderItem={renderBoardMember}
+              refreshControl={
+                <RefreshControl
+                  refreshing={boardRefreshing}
+                  onRefresh={handleBoardRefresh}
+                  tintColor={AppTheme.primary}
+                />
+              }
+              ListEmptyComponent={
+                <Text style={styles.emptyText}>
+                  Nenhum membro de diretoria cadastrado (role = diretoria/admin).
+                </Text>
+              }
+            />
+          )}
+        </>
       )}
 
-      {isDiretoriaOrAdmin && (
+      {/* FAB apenas na aba Times e para diretoria/admin */}
+      {viewMode === 'times' && isDiretoriaOrAdmin && (
         <TouchableOpacity
           style={styles.fab}
           onPress={openCreateModal}
@@ -299,7 +549,7 @@ export default function EquipesListScreen() {
         </TouchableOpacity>
       )}
 
-      {/* Modal criação/edição */}
+      {/* Modal criação/edição de equipe */}
       <Modal
         visible={modalVisible}
         transparent
@@ -361,6 +611,67 @@ export default function EquipesListScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal edição de função na diretoria */}
+      <Modal
+        visible={boardModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          if (!savingBoardRole) {
+            setBoardModalVisible(false);
+            setEditingBoardMember(null);
+          }
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Função na diretoria</Text>
+
+            <Text style={styles.fieldLabel}>Membro</Text>
+            <Text style={styles.infoValueModal}>
+              {editingBoardMember?.full_name || '—'}
+            </Text>
+            <Text style={styles.infoValueModalEmail}>
+              {editingBoardMember?.email || '—'}
+            </Text>
+
+            <Text style={styles.fieldLabel}>Função (ex.: técnico, presidente)</Text>
+            <TextInput
+              style={styles.input}
+              value={boardRoleInput}
+              onChangeText={setBoardRoleInput}
+              placeholder="Descreva a função deste membro na diretoria"
+            />
+
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonOutline]}
+                onPress={() => {
+                  if (!savingBoardRole) {
+                    setBoardModalVisible(false);
+                    setEditingBoardMember(null);
+                  }
+                }}
+              >
+                <Text style={styles.modalButtonOutlineText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonPrimary]}
+                onPress={handleSaveBoardRole}
+                disabled={savingBoardRole}
+              >
+                {savingBoardRole ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.modalButtonPrimaryText}>Salvar</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -375,7 +686,7 @@ const styles = StyleSheet.create({
   pageHeader: {
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 8,
+    paddingBottom: 4,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -383,16 +694,39 @@ const styles = StyleSheet.create({
     width: 90,
     height: 90,
   },
-  pageTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: AppTheme.textPrimary,
-  },
-  pageSubtitle: {
-    fontSize: 13,
-    color: AppTheme.textSecondary,
+
+  // Segmento Times / Diretoria
+  segmentContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
     marginTop: 4,
   },
+  segmentButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+    backgroundColor: '#FFFFFF',
+    marginRight: 8,
+  },
+  segmentButtonActive: {
+    backgroundColor: AppTheme.primary,
+    borderColor: AppTheme.primary,
+  },
+  segmentButtonText: {
+    fontSize: 13,
+    color: AppTheme.textSecondary,
+    fontWeight: '600',
+  },
+  segmentButtonTextActive: {
+    color: '#FFFFFF',
+  },
+
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -468,6 +802,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 4,
   },
+  cardLine: {
+    fontSize: 13,
+    color: AppTheme.textPrimary,
+  },
+  cardLineSmall: {
+    fontSize: 12,
+    color: AppTheme.textMuted,
+  },
+
+  editRoleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+    backgroundColor: '#FFFFFF',
+    marginLeft: 8,
+  },
+  editRoleButtonText: {
+    fontSize: 12,
+    color: AppTheme.primary,
+    fontWeight: '600',
+  },
+
   fab: {
     position: 'absolute',
     right: 18,
@@ -485,7 +845,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
 
-  // Modal
+  // Modal (equipes e funções)
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',
@@ -550,5 +910,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+
+  infoValueModal: {
+    fontSize: 14,
+    color: AppTheme.textPrimary,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  infoValueModalEmail: {
+    fontSize: 12,
+    color: AppTheme.textMuted,
+    marginBottom: 6,
   },
 });
