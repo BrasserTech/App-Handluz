@@ -21,298 +21,317 @@ import { supabase } from '../services/supabaseClient';
 // LOGO
 const handluzLogo = require('../../assets/images/logo_handluz.png');
 
-// CONFIG COMO NO INSTAGRAM REAL (caso você use API mais tarde)
-const INSTAGRAM_CONFIG = {
-  feedEndpoint: '',
-};
-
-// POST MOCKADO (10+ itens)
-const MOCK_INSTAGRAM_POSTS = Array.from({ length: 10 }).map((_, i) => ({
-  id: String(i + 1),
-  imageUrl: `https://picsum.photos/seed/handluz${i}/800/800`,
-  caption: `Publicação oficial do HandLuz nº ${i + 1}`,
-  takenAt: `2025-03-${(i + 1).toString().padStart(2, '0')}`,
-  permalink: undefined,
-}));
+// --- CONFIGURAÇÕES DA META / FACEBOOK ---
+const APP_ID = '1573304237189416';
+const APP_SECRET = 'b0032bdd45552be2364e261d508a71e8'; 
+// A URL abaixo deve ser idêntica à cadastrada em "Login do Facebook > Configurações"
+const REDIRECT_URI = 'https://app.handluz.brassertech.com.br/auth/callback';
 
 // TYPES
-type Team = {
-  id: string;
-  name: string;
-};
+type Team = { id: string; name: string; };
+type SummaryStats = { athletes: number; teams: number; trainingsMonth: number; };
+type Competition = { id: string; name: string | null; category: string | null; location: string | null; start_date: string | null; end_date: string | null; pdf_url: string | null; };
 
-type SummaryStats = {
-  athletes: number;
-  teams: number;
-  trainingsMonth: number;
-};
-
-type Competition = {
-  id: string;
-  name: string | null;
-  category: string | null;
-  location: string | null;
-  start_date: string | null;
-  end_date: string | null;
-  pdf_url: string | null;
-};
-
-// FORMATADORES
-function toIsoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
+// HELPERS DE DATA
+function toIsoDate(d: Date): string { return d.toISOString().slice(0, 10); }
 function formatDateLabel(dateStr: string | null): string {
   if (!dateStr) return '';
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return '';
   return d.toLocaleDateString('pt-BR');
 }
+function formatInstagramDate(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
+}
 
-// MAIN COMPONENT
+// COMPONENTE PRINCIPAL
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
 
+  // --- ESTADOS DO SISTEMA ---
   const [teams, setTeams] = useState<Team[]>([]);
-  const [stats, setStats] = useState<SummaryStats>({
-    athletes: 0,
-    teams: 0,
-    trainingsMonth: 0,
-  });
-
+  const [stats, setStats] = useState<SummaryStats>({ athletes: 0, teams: 0, trainingsMonth: 0 });
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
 
-  const [instagramPosts, setInstagramPosts] = useState(MOCK_INSTAGRAM_POSTS);
+  // --- ESTADOS DO INSTAGRAM ---
+  const [instagramPosts, setInstagramPosts] = useState<any[]>([]);
   const [instagramLoading, setInstagramLoading] = useState<boolean>(false);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
 
+  // Carrega dados iniciais
   useEffect(() => {
     loadHomeData();
-    loadInstagramFeed();
   }, []);
 
+  // --- LÓGICA DE AUTENTICAÇÃO (OAUTH) ---
+
+  // 1. Escuta o retorno do navegador (Deep Link)
+  useEffect(() => {
+    const handleUrl = async ({ url }: { url: string }) => {
+      console.log('[DEBUG INSTA] URL recebida:', url);
+      
+      // Verifica se a URL pertence ao nosso callback
+      if (url && url.startsWith(REDIRECT_URI)) {
+        // Tenta extrair o código ?code=...
+        const regex = /[?&]code=([^#&]+)/;
+        const match = url.match(regex);
+        
+        if (match && match[1]) {
+          const code = match[1];
+          console.log('[DEBUG INSTA] Code extraído:', code);
+          await exchangeCodeForToken(code);
+        } else {
+          console.log('[DEBUG INSTA] Nenhum code encontrado na URL.');
+        }
+      }
+    };
+
+    // Adiciona o ouvinte
+    const subscription = Linking.addEventListener('url', handleUrl);
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  // 2. Inicia o Login (Botão Conectar)
+  const initiateInstagramConnection = async () => {
+    if (isConnected) return;
+    
+    console.log('[DEBUG INSTA] Iniciando login...');
+    setInstagramLoading(true);
+    
+    // Scopes corrigidos: Apenas o básico e páginas (sem mensagens para evitar erro extra)
+    // Se o erro "Invalid Scopes" persistir, verifique se 'instagram_basic' e 'pages_show_list'
+    // foram adicionados no painel "Casos de Uso" da Meta.
+    const scopes = 'instagram_basic,pages_show_list';
+    
+    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
+    
+    try {
+      const supported = await Linking.canOpenURL(authUrl);
+      if (supported) {
+        await Linking.openURL(authUrl);
+      } else {
+        Alert.alert('Erro', 'Navegador não suportado.');
+        setInstagramLoading(false);
+      }
+    } catch (err) {
+      console.error('[DEBUG INSTA] Erro ao abrir link:', err);
+      setInstagramLoading(false);
+    }
+  };
+
+  // 3. Troca o Code pelo Token
+  const exchangeCodeForToken = async (code: string) => {
+    try {
+      console.log('[DEBUG INSTA] Trocando code por token...');
+      const cleanCode = code.replace('#_', '');
+      
+      const tokenUrl = `https://graph.facebook.com/v18.0/oauth/access_token?client_id=${APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&client_secret=${APP_SECRET}&code=${cleanCode}`;
+      
+      const response = await fetch(tokenUrl);
+      const data = await response.json();
+
+      if (data.access_token) {
+        console.log('[DEBUG INSTA] Token obtido!');
+        await fetchInstagramAccountId(data.access_token);
+      } else {
+        console.error('[DEBUG INSTA] Erro no token:', data);
+        Alert.alert('Erro', 'Falha na autenticação com Facebook.');
+        setInstagramLoading(false);
+      }
+    } catch (error) {
+      console.error('[DEBUG INSTA] Erro de rede:', error);
+      setInstagramLoading(false);
+    }
+  };
+
+  // 4. Busca o ID do Instagram Business vinculado
+  const fetchInstagramAccountId = async (accessToken: string) => {
+    try {
+      console.log('[DEBUG INSTA] Buscando contas...');
+      // Pega as páginas do usuário
+      const pagesUrl = `https://graph.facebook.com/v18.0/me/accounts?access_token=${accessToken}`;
+      const pagesResp = await fetch(pagesUrl);
+      const pagesData = await pagesResp.json();
+
+      let instagramBizId = null;
+
+      if (pagesData.data) {
+        // Varre as páginas para achar qual tem Instagram conectado
+        for (const page of pagesData.data) {
+           const pageDetailsUrl = `https://graph.facebook.com/v18.0/${page.id}?fields=instagram_business_account&access_token=${accessToken}`;
+           const detailResp = await fetch(pageDetailsUrl);
+           const detailData = await detailResp.json();
+           
+           if (detailData.instagram_business_account) {
+             instagramBizId = detailData.instagram_business_account.id;
+             console.log('[DEBUG INSTA] ID do Instagram encontrado:', instagramBizId);
+             break;
+           }
+        }
+      }
+
+      if (instagramBizId) {
+        setIsConnected(true);
+        await fetchInstagramMedia(instagramBizId, accessToken);
+      } else {
+        Alert.alert('Atenção', 'Nenhuma conta Instagram Business vinculada encontrada.');
+        setInstagramLoading(false);
+      }
+    } catch (err) {
+      console.error('[DEBUG INSTA] Erro ao buscar ID:', err);
+      setInstagramLoading(false);
+    }
+  };
+
+  // 5. Busca as fotos/feed
+  const fetchInstagramMedia = async (instagramId: string, accessToken: string) => {
+    try {
+      console.log('[DEBUG INSTA] Buscando fotos...');
+      const fields = 'id,caption,media_type,media_url,permalink,timestamp,thumbnail_url';
+      const url = `https://graph.facebook.com/v18.0/${instagramId}/media?fields=${fields}&access_token=${accessToken}&limit=6`;
+      
+      const response = await fetch(url);
+      const json = await response.json();
+      
+      if (json.data) {
+        const formattedPosts = json.data.map((item: any) => ({
+          id: item.id,
+          imageUrl: item.media_type === 'VIDEO' ? item.thumbnail_url : item.media_url,
+          caption: item.caption || '',
+          takenAt: item.timestamp,
+          permalink: item.permalink
+        }));
+        setInstagramPosts(formattedPosts);
+      }
+    } catch (err) {
+      console.error('[DEBUG INSTA] Erro ao carregar feed:', err);
+    } finally {
+      setInstagramLoading(false);
+    }
+  };
+
+  // --- FUNÇÕES DO SISTEMA (TEAMS, ETC) ---
   async function loadHomeData() {
     setLoading(true);
-
     try {
       const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-
-      const monthStartIso = toIsoDate(monthStart);
-      const monthEndIso = toIsoDate(monthEnd);
-      const todayIso = toIsoDate(now);
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString();
+      const todayIso = now.toISOString().slice(0, 10);
 
       const [teamsResp, athletesResp, trainingsResp, compsResp] = await Promise.all([
         supabase.from('teams').select('id, name').order('name'),
         supabase.from('athletes').select('id', { count: 'exact', head: true }),
-        supabase
-          .from('trainings')
-          .select('id', { count: 'exact', head: true })
-          .gte('training_date', monthStartIso)
-          .lte('training_date', monthEndIso),
-
-        supabase
-          .from('competitions')
-          .select('id, name, category, location, start_date, end_date, pdf_url')
-          .or(`start_date.gte.${todayIso},end_date.gte.${todayIso}`)
-          .order('start_date', { ascending: true }),
+        supabase.from('trainings').select('id', { count: 'exact', head: true })
+          .gte('training_date', monthStart).lte('training_date', monthEnd),
+        supabase.from('competitions').select('*')
+          .or(`start_date.gte.${todayIso},end_date.gte.${todayIso}`).order('start_date', { ascending: true }),
       ]);
 
-      const teamsData = teamsResp.data ?? [];
-      const compsData = compsResp.data ?? [];
-
-      setTeams(teamsData);
+      setTeams(teamsResp.data ?? []);
       setStats({
         athletes: athletesResp.count ?? 0,
-        teams: teamsData.length,
+        teams: (teamsResp.data ?? []).length,
         trainingsMonth: trainingsResp.count ?? 0,
       });
-
-      setCompetitions(compsData);
-    } catch {
-      Alert.alert('Erro', 'Falha ao carregar dados.');
+      setCompetitions(compsResp.data ?? []);
+    } catch (err) {
+      // log silencioso
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadInstagramFeed() {
-    setInstagramLoading(true);
-
-    try {
-      if (!INSTAGRAM_CONFIG.feedEndpoint) {
-        setInstagramPosts(MOCK_INSTAGRAM_POSTS);
-        setInstagramLoading(false);
-        return;
-      }
-
-      const response = await fetch(INSTAGRAM_CONFIG.feedEndpoint);
-      const json = await response.json();
-      const posts = Array.isArray(json) ? json : json.data ?? [];
-      setInstagramPosts(posts.slice(0, 10));
-    } catch {
-      setInstagramPosts(MOCK_INSTAGRAM_POSTS);
-    } finally {
-      setInstagramLoading(false);
-    }
-  }
-
   function handleNavigateToTeam(id: string, name: string) {
-    navigation.navigate('Equipes', {
-      screen: 'EquipeAtletas',
-      params: { equipeId: id, equipeNome: name },
-    });
+    navigation.navigate('Equipes', { screen: 'EquipeAtletas', params: { equipeId: id, equipeNome: name } });
   }
 
   async function handleOpenUrl(url?: string | null) {
-    if (!url) return;
-    const supported = await Linking.canOpenURL(url);
-    if (supported) {
-      Linking.openURL(url);
-    } else {
-      Alert.alert('Erro', 'Não foi possível abrir o link.');
-    }
+    if (url) await Linking.openURL(url);
   }
 
-  function formatInstagramDate(iso?: string | null): string {
-    if (!iso) return '';
-    const d = new Date(iso);
-    return d.toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-  }
 
+  // --- RENDER ---
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
-      
-      {/* HEADER PRINCIPAL */}
+      {/* HEADER */}
       <View style={styles.eventCard}>
         <View style={styles.eventHeader}>
           <View style={{ flex: 1 }}>
             <Text style={styles.eventTitle}>HandLuz 2025</Text>
-
-            <View style={styles.eventDateRow}>
-              <Ionicons name="calendar-outline" size={14} color={AppTheme.textSecondary} />
-              <Text style={styles.eventDate}>18 de março a 5 de dezembro</Text>
-            </View>
-
             <View style={styles.eventDateRow}>
               <Ionicons name="location-outline" size={14} color={AppTheme.textSecondary} />
               <Text style={styles.eventDate}>Luzerna - Santa Catarina</Text>
             </View>
           </View>
-
           <View style={styles.logoWrapper}>
             <Image source={handluzLogo} style={styles.eventLogo} resizeMode="contain" />
           </View>
         </View>
 
-        <View style={styles.introWrapper}>
-          <Text style={styles.introTitle}>Clube HandLuz – Formação em Handebol</Text>
-
-          <Text style={styles.introText}>
-            O HandLuz é o clube de handebol da cidade de Luzerna/SC, acompanhando treinos,
-            equipes, competições e notícias oficiais do projeto.
-          </Text>
-        </View>
-
         <View style={styles.statsRow}>
-          {loading ? (
-            <ActivityIndicator size="small" color={AppTheme.primary} />
-          ) : (
-            <>
-              <View style={styles.statBox}>
-                <Text style={styles.statNumber}>{stats.athletes}</Text>
-                <Text style={styles.statLabel}>Atletas</Text>
-              </View>
-
-              <View style={styles.statBox}>
-                <Text style={styles.statNumber}>{stats.teams}</Text>
-                <Text style={styles.statLabel}>Times</Text>
-              </View>
-
-              <View style={styles.statBox}>
-                <Text style={styles.statNumber}>{stats.trainingsMonth}</Text>
-                <Text style={styles.statLabel}>Treinos no mês</Text>
-              </View>
-            </>
-          )}
+           <View style={styles.statBox}><Text style={styles.statNumber}>{stats.athletes}</Text><Text style={styles.statLabel}>Atletas</Text></View>
+           <View style={styles.statBox}><Text style={styles.statNumber}>{stats.teams}</Text><Text style={styles.statLabel}>Times</Text></View>
+           <View style={styles.statBox}><Text style={styles.statNumber}>{stats.trainingsMonth}</Text><Text style={styles.statLabel}>Treinos/Mês</Text></View>
         </View>
       </View>
 
-      {/* MODALIDADES */}
-      <Text style={styles.sectionTitle}>MODALIDADES / CATEGORIAS</Text>
+      {/* CATEGORIAS */}
+      <Text style={styles.sectionTitle}>CATEGORIAS</Text>
+      <View style={styles.categoriesGrid}>
+        {teams.map(team => (
+          <TouchableOpacity key={team.id} style={styles.categoryButton} onPress={() => handleNavigateToTeam(team.id, team.name)}>
+            <Ionicons name="people-outline" size={24} color="#FFF" />
+            <Text style={styles.categoryText}>{team.name}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
-      {teams.length === 0 ? (
-        <Text style={styles.emptyText}>Nenhuma equipe cadastrada ainda.</Text>
-      ) : (
-        <View style={styles.categoriesGrid}>
-          {teams.map(team => (
-            <TouchableOpacity
-              key={team.id}
-              style={styles.categoryButton}
-              onPress={() => handleNavigateToTeam(team.id, team.name)}
-            >
-              <Ionicons name="person-outline" size={24} color="#FFF" />
-              <Text style={styles.categoryText}>{team.name}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      {/* PRÓXIMAS COMPETIÇÕES */}
-      <Text style={[styles.sectionTitle, { marginTop: 20 }]}>PRÓXIMAS COMPETIÇÕES</Text>
-
-      {competitions.length === 0 ? (
-        <Text style={styles.emptyText}>Nenhuma competição cadastrada.</Text>
-      ) : (
-        competitions.map(comp => (
-          <View key={comp.id} style={styles.compCard}>
-            <Text style={styles.compTitle}>{comp.name}</Text>
-
-            {comp.category && <Text style={styles.compTag}>{comp.category}</Text>}
-
-            {(comp.start_date || comp.end_date) && (
-              <Text style={styles.compLine}>
-                {formatDateLabel(comp.start_date)}
-                {comp.end_date ? ` a ${formatDateLabel(comp.end_date)}` : ''}
-              </Text>
-            )}
-
-            {comp.location && <Text style={styles.compLine}>{comp.location}</Text>}
-
-            {comp.pdf_url && (
-              <TouchableOpacity style={styles.linkButton} onPress={() => handleOpenUrl(comp.pdf_url)}>
-                <Ionicons name="document-text-outline" size={14} color={AppTheme.primary} />
-                <Text style={styles.linkButtonText}>Ver regulamento</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        ))
-      )}
-
-      {/* FEED DO INSTAGRAM - LISTA VERTICAL */}
-      <Text style={[styles.sectionTitle, { marginTop: 20 }]}>FEED DO INSTAGRAM</Text>
+      {/* FEED INSTAGRAM */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 10 }}>
+        <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>FEED DO INSTAGRAM</Text>
+        
+        {/* Botão de Conectar */}
+        {!isConnected && (
+           <TouchableOpacity onPress={initiateInstagramConnection} style={styles.connectButton} disabled={instagramLoading}>
+             {instagramLoading ? (
+                <ActivityIndicator size="small" color="#FFF" />
+             ) : (
+                <>
+                  <Ionicons name="logo-instagram" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.connectButtonText}>Conectar</Text>
+                </>
+             )}
+           </TouchableOpacity>
+        )}
+      </View>
 
       <View style={styles.instagramCard}>
         {instagramLoading ? (
-          <ActivityIndicator size="small" color={AppTheme.primary} />
+          <View style={{ padding: 20, alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={AppTheme.primary} />
+            <Text style={{ marginTop: 10, fontSize: 12, color: AppTheme.textSecondary }}>Aguardando Facebook...</Text>
+          </View>
+        ) : instagramPosts.length === 0 ? (
+          <View style={{ padding: 20, alignItems: 'center' }}>
+            <Text style={{ color: AppTheme.textSecondary, textAlign: 'center' }}>
+              {isConnected ? 'Nenhuma publicação recente.' : 'Conecte para ver o feed oficial.'}
+            </Text>
+          </View>
         ) : (
           <View style={styles.instagramVerticalList}>
             {instagramPosts.map(post => (
-              <TouchableOpacity
-                key={post.id}
-                style={styles.instagramPostCard}
-                onPress={() => post.permalink && handleOpenUrl(post.permalink)}
-              >
-                <Image source={{ uri: post.imageUrl }} style={styles.instagramImage} />
-
+              <TouchableOpacity key={post.id} style={styles.instagramPostCard} onPress={() => post.permalink && handleOpenUrl(post.permalink)}>
+                {post.imageUrl && (
+                  <Image source={{ uri: post.imageUrl }} style={styles.instagramImage} resizeMode="cover" />
+                )}
                 <View style={styles.instagramPostBody}>
                   <Text numberOfLines={3} style={styles.instagramCaption}>{post.caption}</Text>
-
                   {post.takenAt && (
                     <Text style={styles.instagramDate}>{formatInstagramDate(post.takenAt)}</Text>
                   )}
@@ -321,238 +340,35 @@ export default function HomeScreen() {
             ))}
           </View>
         )}
-
-        <Text style={styles.instagramHint}>
-          As publicações são sincronizadas automaticamente via serviço próprio.
-        </Text>
       </View>
     </ScrollView>
   );
 }
 
-/* ---------------------------- STYLES ---------------------------- */
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: AppTheme.background,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-
-  /* HEADER PRINCIPAL */
-  eventCard: {
-    backgroundColor: AppTheme.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: AppTheme.border,
-  },
-
-  eventHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-
-  eventTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: AppTheme.textPrimary,
-  },
-
-  eventDateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-
-  eventDate: {
-    marginLeft: 6,
-    color: AppTheme.textSecondary,
-    fontSize: 12,
-  },
-
-  logoWrapper: {
-    width: 70,
-    height: 70,
-    borderRadius: 40,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 2,
-  },
-
-  eventLogo: {
-    width: 60,
-    height: 60,
-  },
-
-  introWrapper: {
-    marginTop: 12,
-  },
-
-  introTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: AppTheme.textPrimary,
-  },
-
-  introText: {
-    fontSize: 12,
-    color: AppTheme.textSecondary,
-    lineHeight: 18,
-  },
-
-  statsRow: {
-    flexDirection: 'row',
-    marginTop: 16,
-    justifyContent: 'space-around',
-  },
-
-  statBox: {
-    alignItems: 'center',
-  },
-
-  statNumber: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: AppTheme.primaryDark,
-  },
-
-  statLabel: {
-    fontSize: 12,
-    color: AppTheme.textSecondary,
-  },
-
-  /* TITULOS DE SESSÃO */
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: AppTheme.textPrimary,
-    marginBottom: 10,
-  },
-
-  emptyText: {
-    fontSize: 13,
-    color: AppTheme.textSecondary,
-    marginBottom: 10,
-  },
-
-  /* MODALIDADES */
-  categoriesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 10,
-  },
-
-  categoryButton: {
-    width: '30%',
-    aspectRatio: 1,
-    backgroundColor: AppTheme.primary,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  categoryText: {
-    marginTop: 6,
-    color: '#FFF',
-    fontWeight: '600',
-    fontSize: 12,
-    textAlign: 'center',
-  },
-
-  /* COMPETITIONS */
-  compCard: {
-    backgroundColor: AppTheme.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: AppTheme.border,
-    padding: 12,
-    marginBottom: 8,
-  },
-
-  compTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: AppTheme.textPrimary,
-  },
-
-  compTag: {
-    fontSize: 11,
-    color: AppTheme.primary,
-    marginTop: 2,
-  },
-
-  compLine: {
-    fontSize: 12,
-    color: AppTheme.textSecondary,
-    marginTop: 4,
-  },
-
-  linkButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-  },
-
-  linkButtonText: {
-    fontSize: 12,
-    color: AppTheme.primary,
-    fontWeight: '600',
-  },
-
-  /* INSTAGRAM FEED */
-  instagramCard: {
-    backgroundColor: AppTheme.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: AppTheme.border,
-    padding: 12,
-  },
-
-  /* AGORA É FEED VERTICAL */
-  instagramVerticalList: {
-    flexDirection: 'column',
-    gap: 16,
-  },
-
-  instagramPostCard: {
-    width: '100%',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: AppTheme.border,
-    backgroundColor: '#fff',
-    overflow: 'hidden',
-  },
-
-  instagramImage: {
-    width: '100%',
-    height: 260,
-  },
-
-  instagramPostBody: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-
-  instagramCaption: {
-    fontSize: 13,
-    color: AppTheme.textPrimary,
-  },
-
-  instagramDate: {
-    fontSize: 11,
-    color: AppTheme.textSecondary,
-    marginTop: 4,
-  },
-
-  instagramHint: {
-    marginTop: 12,
-    fontSize: 11,
-    color: AppTheme.textMuted,
-  },
+  container: { flex: 1, backgroundColor: AppTheme.background, paddingHorizontal: 16, paddingTop: 12 },
+  eventCard: { backgroundColor: AppTheme.surface, borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: AppTheme.border },
+  eventHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  eventTitle: { fontSize: 20, fontWeight: '700', color: AppTheme.textPrimary },
+  eventDate: { fontSize: 12, color: AppTheme.textSecondary },
+  eventDateRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  logoWrapper: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  eventLogo: { width: 40, height: 40 },
+  statsRow: { flexDirection: 'row', marginTop: 16, justifyContent: 'space-around' },
+  statBox: { alignItems: 'center' },
+  statNumber: { fontSize: 18, fontWeight: '700', color: AppTheme.primaryDark },
+  statLabel: { fontSize: 12, color: AppTheme.textSecondary },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: AppTheme.textPrimary, marginBottom: 10 },
+  categoriesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  categoryButton: { width: '30%', aspectRatio: 1, backgroundColor: AppTheme.primary, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  categoryText: { marginTop: 6, color: '#FFF', fontWeight: '600', fontSize: 11 },
+  connectButton: { backgroundColor: '#E1306C', flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
+  connectButtonText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
+  instagramCard: { backgroundColor: AppTheme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: AppTheme.border, minHeight: 100 },
+  instagramVerticalList: { gap: 16 },
+  instagramPostCard: { borderRadius: 14, backgroundColor: '#fff', overflow: 'hidden', borderWidth: 1, borderColor: AppTheme.border },
+  instagramImage: { width: '100%', height: 260 },
+  instagramPostBody: { padding: 10 },
+  instagramCaption: { fontSize: 13, color: AppTheme.textPrimary },
+  instagramDate: { fontSize: 11, color: AppTheme.textSecondary, marginTop: 4 },
 });
