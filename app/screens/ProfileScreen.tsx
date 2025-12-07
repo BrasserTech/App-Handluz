@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   ScrollView,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 
 import { AppTheme } from '../../constants/theme';
 import { useAuth } from '../context/AuthContext';
@@ -36,13 +37,15 @@ const ROLE_OPTIONS: { value: RoleValue; label: string; description: string }[] =
 ];
 
 export default function ProfileScreen() {
-  const { user, refreshProfile } = useAuth();
+  const navigation = useNavigation();
+  const { user, refreshProfile, signOut, loading: authLoading } = useAuth();
 
   const [selectedRole, setSelectedRole] = useState<RoleValue>('usuario');
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [comboOpen, setComboOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     if (user?.role && ['usuario', 'diretoria', 'admin'].includes(user.role)) {
@@ -56,6 +59,13 @@ export default function ProfileScreen() {
         <Text style={styles.errorText}>
           Nenhum usuário autenticado. Faça login novamente.
         </Text>
+        <TouchableOpacity
+          style={styles.loginButton}
+          onPress={() => navigation.navigate('Login' as never)}
+          activeOpacity={0.9}
+        >
+          <Text style={styles.loginButtonText}>Ir para Login</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -106,6 +116,20 @@ export default function ProfileScreen() {
     } finally {
       setSaving(false);
       setComboOpen(false);
+    }
+  }
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await signOut();
+      // Navega para a tela de login após logout
+      navigation.navigate('Login' as never);
+    } catch (err) {
+      console.error('[ProfileScreen] Erro ao fazer logout:', err);
+      setError('Erro ao fazer logout. Tente novamente.');
+    } finally {
+      setLoggingOut(false);
     }
   }
 
@@ -208,6 +232,20 @@ export default function ProfileScreen() {
             <Text style={styles.saveButtonText}>Salvar alterações</Text>
           )}
         </TouchableOpacity>
+
+        {/* BOTÃO DE LOGOUT */}
+        <TouchableOpacity
+          style={styles.logoutButton}
+          onPress={handleLogout}
+          disabled={loggingOut || authLoading}
+          activeOpacity={0.9}
+        >
+          {loggingOut ? (
+            <ActivityIndicator color="#FFF" />
+          ) : (
+            <Text style={styles.logoutButtonText}>Sair da conta</Text>
+          )}
+        </TouchableOpacity>
       </ScrollView>
     </View>
   );
@@ -234,6 +272,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
+  },
+  loginButton: {
+    marginTop: 16,
+    backgroundColor: AppTheme.primary,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  loginButtonText: {
+    color: '#FFF',
+    fontWeight: '600',
+    fontSize: 15,
   },
   title: {
     fontSize: 22,
@@ -362,5 +413,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#D32F2F',
     textAlign: 'left',
+  },
+  logoutButton: {
+    marginTop: 12,
+    backgroundColor: '#D32F2F',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  logoutButtonText: {
+    color: '#FFF',
+    fontWeight: '600',
+    fontSize: 15,
   },
 });

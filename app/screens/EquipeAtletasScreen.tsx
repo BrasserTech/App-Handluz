@@ -957,16 +957,19 @@ export default function EquipeAtletasScreen({ route }: Props) {
             </Text>
             <View style={styles.imageRow}>
               <TouchableOpacity
-                style={styles.imageButton}
-                onPress={() => pickImage(setDocFrente)}
+                style={[styles.imageButton, styles.imageButtonDisabled]}
+                onPress={() => {}}
+                disabled={true}
               >
                 <Ionicons
                   name="document-text-outline"
                   size={18}
-                  color={AppTheme.primary}
+                  color={AppTheme.textMuted}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={styles.imageButtonText}>Escolher frente</Text>
+                <Text style={[styles.imageButtonText, styles.imageButtonTextDisabled]}>
+                  Em desenvolvimento
+                </Text>
               </TouchableOpacity>
 
               {docFrente && (
@@ -983,16 +986,19 @@ export default function EquipeAtletasScreen({ route }: Props) {
             </Text>
             <View style={styles.imageRow}>
               <TouchableOpacity
-                style={styles.imageButton}
-                onPress={() => pickImage(setDocVerso)}
+                style={[styles.imageButton, styles.imageButtonDisabled]}
+                onPress={() => {}}
+                disabled={true}
               >
                 <Ionicons
                   name="document-text-outline"
                   size={18}
-                  color={AppTheme.primary}
+                  color={AppTheme.textMuted}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={styles.imageButtonText}>Escolher verso</Text>
+                <Text style={[styles.imageButtonText, styles.imageButtonTextDisabled]}>
+                  Em desenvolvimento
+                </Text>
               </TouchableOpacity>
 
               {docVerso && (
@@ -1351,6 +1357,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: AppTheme.primary,
     fontWeight: '600',
+  },
+  imageButtonDisabled: {
+    opacity: 0.6,
+    backgroundColor: '#F5F5F5',
+    borderColor: AppTheme.border,
+  },
+  imageButtonTextDisabled: {
+    color: AppTheme.textMuted,
   },
   imagePreview: {
     width: 40,

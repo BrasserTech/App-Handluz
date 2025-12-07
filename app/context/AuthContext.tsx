@@ -6,8 +6,10 @@ import React, {
   createContext,
   useContext,
   useState,
+  useEffect,
   ReactNode,
 } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../services/supabaseClient';
 
 export type HandluzRole = 'usuario' | 'diretoria' | 'admin';
@@ -35,10 +37,65 @@ interface Props {
   children: ReactNode;
 }
 
+const STORAGE_USER_KEY = 'handluz_auth_user';
+
 export function AuthProvider({ children }: Props) {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true); // Inicia como true para carregar estado salvo
   const [error, setError] = useState<string | null>(null);
+
+  // Carrega o usuário salvo quando o componente é montado
+  useEffect(() => {
+    loadSavedUser();
+  }, []);
+
+  async function loadSavedUser() {
+    try {
+      const savedUserJson = await AsyncStorage.getItem(STORAGE_USER_KEY);
+      if (savedUserJson) {
+        const savedUser: AuthUser = JSON.parse(savedUserJson);
+        // Verifica se o perfil ainda existe no banco
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, email, full_name, role, is_board')
+          .eq('id', savedUser.id)
+          .single();
+
+        if (!profileError && profile) {
+          // Atualiza com dados mais recentes
+          const authUser: AuthUser = {
+            id: profile.id,
+            email: profile.email,
+            fullName: profile.full_name,
+            role: (profile.role as HandluzRole) ?? 'usuario',
+            isBoard: !!profile.is_board,
+          };
+          setUser(authUser);
+          // Salva novamente com dados atualizados
+          await AsyncStorage.setItem(STORAGE_USER_KEY, JSON.stringify(authUser));
+        } else {
+          // Perfil não existe mais, remove do storage
+          await AsyncStorage.removeItem(STORAGE_USER_KEY);
+        }
+      }
+    } catch (e) {
+      console.error('[AuthContext] Erro ao carregar usuário salvo:', e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function saveUser(userData: AuthUser | null) {
+    try {
+      if (userData) {
+        await AsyncStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userData));
+      } else {
+        await AsyncStorage.removeItem(STORAGE_USER_KEY);
+      }
+    } catch (e) {
+      console.error('[AuthContext] Erro ao salvar usuário:', e);
+    }
+  }
 
   async function signIn(email: string, password: string): Promise<boolean> {
     setLoading(true);
@@ -86,6 +143,7 @@ export function AuthProvider({ children }: Props) {
       };
 
       setUser(authUser);
+      await saveUser(authUser); // Salva no AsyncStorage
       setError(null);
       return true;
     } catch (e: any) {
@@ -102,6 +160,7 @@ export function AuthProvider({ children }: Props) {
     setError(null);
     try {
       setUser(null);
+      await saveUser(null); // Remove do AsyncStorage
     } catch (e: any) {
       console.error('[AuthContext] Erro inesperado no signOut:', e);
       setError('Erro inesperado ao sair.');
@@ -122,13 +181,16 @@ export function AuthProvider({ children }: Props) {
 
       if (profileError || !profile) return;
 
-      setUser({
+      const updatedUser: AuthUser = {
         id: profile.id,
         email: profile.email,
         fullName: profile.full_name,
         role: (profile.role as HandluzRole) ?? 'usuario',
         isBoard: !!profile.is_board,
-      });
+      };
+
+      setUser(updatedUser);
+      await saveUser(updatedUser); // Atualiza no AsyncStorage
     } catch (e) {
       console.error('[AuthContext] Erro ao atualizar perfil:', e);
     }
