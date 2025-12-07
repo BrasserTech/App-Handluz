@@ -80,3 +80,15 @@ export type MembroDiretoria = {
   telefone?: string;
   email?: string;
 };
+
+export type AthleteImage = {
+  id: string;
+  athlete_id: string;
+  file_path: string;
+  file_url: string;
+  file_name: string;
+  file_size: number;
+  file_type: string;
+  bucket_name: string;
+  uploaded_at: string;
+};

@@ -86,6 +86,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
     back?: string | null;
   } | null>(null);
 
+
   // ========================= UTILITÁRIOS =========================
 
   function calcularIdade(dateString: string | null): number | null {
@@ -165,6 +166,166 @@ export default function EquipeAtletasScreen({ route }: Props) {
     } catch (err) {
       console.error('[EquipeAtletasScreen] Erro inesperado upload:', err);
       return null;
+    }
+  }
+
+  // Upload de imagem para athlete_images (usando o método que já funciona)
+  async function uploadImageToAthleteImages(
+    picked: PickedImage,
+    athleteId: string
+  ): Promise<string | null> {
+    try {
+      // Validar tipo de arquivo
+      const fileExtension = picked.uri.split('.').pop()?.toLowerCase() || '';
+      const mimeType = `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`;
+      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+
+      if (!allowedTypes.includes(mimeType)) {
+        Alert.alert(
+          'Tipo de arquivo inválido',
+          'Por favor, selecione apenas imagens (JPG, PNG ou WEBP).'
+        );
+        return null;
+      }
+
+      // Obter informações do arquivo
+      const response = await fetch(picked.uri);
+      const blob = await response.blob();
+
+      // Validar tamanho (5MB)
+      const MAX_SIZE = 5 * 1024 * 1024;
+      if (blob.size > MAX_SIZE) {
+        Alert.alert(
+          'Arquivo muito grande',
+          `O arquivo selecionado tem ${(blob.size / 1024 / 1024).toFixed(2)}MB. O tamanho máximo permitido é 5MB.`
+        );
+        return null;
+      }
+
+      // Usar o método uploadImageToStorage que já funciona
+      // Passar apenas o ID do atleta, sem o prefixo "athletes/" para evitar duplicação
+      const publicUrl = await uploadImageToStorage(
+        picked,
+        `${athleteId}-photo`
+      );
+
+      if (!publicUrl) {
+        // Se o upload falhou, retornar null para que a imagem seja salva ao clicar em "Salvar"
+        console.warn('[EquipeAtletasScreen] Upload falhou, imagem será salva ao clicar em Salvar');
+        return null;
+      }
+
+      // Extrair informações do arquivo para salvar na tabela athlete_images
+      const fileName = `athlete-${athleteId}-${Date.now()}.${fileExtension}`;
+      // Extrair o file_path da URL pública
+      const urlObj = new URL(publicUrl);
+      const pathMatch = urlObj.pathname.match(/\/storage\/v1\/object\/public\/athletes\/(.+)/);
+      const filePath = pathMatch ? pathMatch[1] : `${athleteId}-photo-${Date.now()}.${fileExtension}`;
+
+      // Salvar informações no banco de dados (tabela athlete_images)
+      const { error: dbError } = await supabase.from('athlete_images').insert({
+        file_path: filePath,
+        file_url: publicUrl,
+        file_name: fileName,
+        file_size: blob.size,
+        file_type: mimeType,
+        bucket_name: 'athletes',
+        athlete_id: athleteId,
+        uploaded_at: new Date().toISOString(),
+      });
+
+      if (dbError) {
+        console.error('[EquipeAtletasScreen] Erro ao salvar no banco:', dbError);
+        // Não mostramos alerta aqui, apenas log, pois a imagem já foi salva no storage
+        // Retornamos a URL mesmo assim
+        return publicUrl;
+      }
+
+      return publicUrl;
+    } catch (error) {
+      console.error('[EquipeAtletasScreen] Erro inesperado no upload:', error);
+      // Não mostramos alerta, apenas retornamos null para que seja salva ao clicar em "Salvar"
+      return null;
+    }
+  }
+
+  // Função para escolher e fazer upload direto (para edição de atleta)
+  async function handlePickAndUploadImage() {
+    if (!editingAthlete) {
+      // Se não estiver editando, usa o comportamento antigo
+      pickImage(setImagemAtleta);
+      return;
+    }
+
+    const allowed = await ensureMediaPermission();
+    if (!allowed) return;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.9,
+      aspect: [1, 1],
+    });
+
+    if (result.canceled || !result.assets[0]) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    const pickedImage: PickedImage = { uri: asset.uri };
+
+    // Atualizar o preview IMEDIATAMENTE (antes do upload)
+    setImagemAtleta(pickedImage);
+    // Limpar erro de validação se houver
+    if (fieldErrors.imagem) {
+      setFieldErrors(prev => ({ ...prev, imagem: undefined }));
+    }
+
+    // Mostrar loading
+    setSaving(true);
+
+    try {
+      // Fazer upload
+      console.log('[EquipeAtletasScreen] Iniciando upload da imagem...');
+      const imageUrl = await uploadImageToAthleteImages(
+        pickedImage,
+        editingAthlete.id
+      );
+
+      console.log('[EquipeAtletasScreen] Upload concluído, imageUrl:', imageUrl);
+
+      if (imageUrl) {
+        // Atualizar o atleta com a nova URL da imagem
+        const { error: updateError } = await supabase
+          .from('athletes')
+          .update({ image_url: imageUrl })
+          .eq('id', editingAthlete.id);
+
+        if (updateError) {
+          console.error(
+            '[EquipeAtletasScreen] Erro ao atualizar image_url:',
+            updateError.message
+          );
+          Alert.alert('Erro', 'A imagem foi enviada, mas não foi possível atualizar o atleta.');
+        } else {
+          console.log('[EquipeAtletasScreen] image_url atualizado com sucesso');
+          // Atualizar o estado do atleta em edição
+          setEditingAthlete({
+            ...editingAthlete,
+            image_url: imageUrl,
+          });
+          Alert.alert('Sucesso!', 'Imagem do atleta enviada com sucesso.');
+        }
+      } else {
+        console.warn('[EquipeAtletasScreen] Upload retornou null, mas a imagem local será salva ao clicar em Salvar');
+        // Se o upload falhou (provavelmente por RLS), a imagem local será salva quando o usuário clicar em "Salvar"
+        // Não mostramos alerta para não incomodar o usuário, pois a imagem já está no preview
+      }
+    } catch (error) {
+      console.error('[EquipeAtletasScreen] Erro inesperado:', error);
+      Alert.alert('Erro', 'Ocorreu um erro ao fazer o upload da imagem. A imagem local será salva ao clicar em "Salvar".');
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -403,7 +564,14 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
         const updatePayload: any = { ...basePayload };
 
-        if (imageUrl) updatePayload.image_url = imageUrl;
+        // Se houver nova imagem local, usar ela. Caso contrário, usar a image_url do atleta (que pode ter sido atualizada via upload)
+        if (imageUrl) {
+          updatePayload.image_url = imageUrl;
+        } else if (editingAthlete.image_url) {
+          // Se não há nova imagem local, mas há image_url no atleta (pode ter sido atualizada via upload), manter ela
+          updatePayload.image_url = editingAthlete.image_url;
+        }
+        
         if (docFrontUrl) updatePayload.document_front_url = docFrontUrl;
         if (docBackUrl) updatePayload.document_back_url = docBackUrl;
 
@@ -749,15 +917,22 @@ export default function EquipeAtletasScreen({ route }: Props) {
                   styles.imageButton,
                   fieldErrors.imagem ? styles.inputError : null,
                 ]}
-                onPress={() => pickImage(setImagemAtleta)}
+                onPress={handlePickAndUploadImage}
+                disabled={saving}
               >
-                <Ionicons
-                  name="image-outline"
-                  size={18}
-                  color={AppTheme.primary}
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={styles.imageButtonText}>Escolher imagem</Text>
+                {saving ? (
+                  <ActivityIndicator size="small" color={AppTheme.primary} />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="image-outline"
+                      size={18}
+                      color={AppTheme.primary}
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text style={styles.imageButtonText}>Escolher imagem</Text>
+                  </>
+                )}
               </TouchableOpacity>
 
               {imagemAtleta ? (
@@ -935,6 +1110,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
     </View>
   );
 }
