@@ -1,0 +1,18 @@
+services:
+  app-handluz:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: app-handluz
+    environment:
+      - PORT=3000
+      - FORCE_HTTP=true
+      - NODE_ENV=production
+    restart: unless-stopped
+    networks:
+      - site-network
+    command: node server/webServer.js
+
+networks:
+  site-network:
+    external: true

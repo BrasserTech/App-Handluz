@@ -22,11 +22,19 @@ import { INSTAGRAM_URL, INSTAGRAM_USERNAME, INSTAGRAM_GRID_CONFIG } from '../../
 import { fetchInstagramPosts, InstagramPost } from '../services/instagramService';
 
 const { width } = Dimensions.get('window');
-const POST_WIDTH = ((width - INSTAGRAM_GRID_CONFIG.padding) / INSTAGRAM_GRID_CONFIG.columns) * INSTAGRAM_GRID_CONFIG.sizeMultiplier;
 
 // Detectar se é tela grande (computador) - ajustar tamanho das categorias
-const isDesktop = width > 768; // Breakpoint comum para tablets/desktop
+const isDesktop = width >= INSTAGRAM_GRID_CONFIG.breakpoint;
 const CATEGORY_WIDTH = isDesktop ? '10%' : '30%'; // Menor no desktop, normal no mobile
+
+// Configuração responsiva do grid do Instagram (usando configurações do instagram.ts)
+const gridConfig = isDesktop ? INSTAGRAM_GRID_CONFIG.desktop : INSTAGRAM_GRID_CONFIG.mobile;
+const INSTAGRAM_COLUMNS = gridConfig.columns;
+const INSTAGRAM_PADDING = gridConfig.padding;
+const INSTAGRAM_GAP = gridConfig.gap;
+
+// Calcular largura dos posts baseado no número de colunas responsivo
+const POST_WIDTH = ((width - INSTAGRAM_PADDING - (INSTAGRAM_GAP * (INSTAGRAM_COLUMNS - 1))) / INSTAGRAM_COLUMNS) * INSTAGRAM_GRID_CONFIG.sizeMultiplier;
 
 // LOGO
 const handluzLogo = require('../../assets/images/logo_handluz.png');
@@ -224,11 +232,11 @@ export default function HomeScreen() {
           </View>
         ) : (
           <View>
-            <View style={styles.instagramGrid}>
+            <View style={[styles.instagramGrid, { gap: INSTAGRAM_GAP }]}>
               {instagramPosts.map((post) => (
                 <TouchableOpacity
                   key={post.id}
-                  style={styles.instagramPostItem}
+                  style={[styles.instagramPostItem, { width: POST_WIDTH, height: POST_WIDTH }]}
                   onPress={() => handleOpenPost(post.permalink)}
                   activeOpacity={0.7}
                 >
@@ -236,6 +244,12 @@ export default function HomeScreen() {
                     source={{ uri: post.imageUrl }}
                     style={styles.instagramPostImage}
                     resizeMode="cover"
+                    onError={(error) => {
+                      console.error(`[HomeScreen] Erro ao carregar imagem do post ${post.id}:`, error.nativeEvent?.error || error);
+                    }}
+                    onLoad={() => {
+                      console.log(`[HomeScreen] Imagem carregada com sucesso: ${post.id}`);
+                    }}
                   />
                   <View style={styles.instagramPostOverlay}>
                     <View style={styles.instagramPostStats}>
@@ -282,8 +296,8 @@ const styles = StyleSheet.create({
   instagramHeaderButtonText: { color: '#E1306C', fontSize: 12, fontWeight: '600' },
   instagramButton: { backgroundColor: '#E1306C', flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 32, borderRadius: 30, shadowColor: '#E1306C', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
   instagramButtonText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
-  instagramGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: INSTAGRAM_GRID_CONFIG.gap },
-  instagramPostItem: { width: POST_WIDTH, height: POST_WIDTH, position: 'relative', borderRadius: 8, overflow: 'hidden' },
+  instagramGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
+  instagramPostItem: { position: 'relative', borderRadius: 8, overflow: 'hidden' },
   instagramPostImage: { width: '100%', height: '100%' },
   instagramPostOverlay: { 
     position: 'absolute', 

@@ -293,7 +293,6 @@ if (!html.includes('service-worker')) {
         }
       }, 2000);
     });
-    }
   </script>
 `;
   html = html.replace('</body>', swScript + '</body>');

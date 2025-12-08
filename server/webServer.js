@@ -5,8 +5,65 @@ const fs = require('fs');
 const path = require('path');
 const url = require('url');
 
+// Cache simples para posts do Instagram (evitar muitas requisições)
+const instagramCache = {
+  data: null,
+  timestamp: null,
+  ttl: 30 * 60 * 1000, // 30 minutos
+};
+
+function getCachedPosts() {
+  if (instagramCache.data && instagramCache.timestamp && Array.isArray(instagramCache.data) && instagramCache.data.length > 0) {
+    const age = Date.now() - instagramCache.timestamp;
+    if (age < instagramCache.ttl) {
+      console.log(`[Instagram Cache] Retornando ${instagramCache.data.length} posts do cache (idade: ${Math.round(age / 1000)}s)`);
+      return instagramCache.data;
+    } else {
+      console.log(`[Instagram Cache] Cache expirado (idade: ${Math.round(age / 1000)}s)`);
+    }
+  }
+  return null;
+}
+
+function setCachedPosts(posts) {
+  instagramCache.data = posts;
+  instagramCache.timestamp = Date.now();
+  console.log(`[Instagram Cache] Posts salvos no cache`);
+}
+
 const PORT = process.env.PORT || 3000;
 const DIST_PATH = path.join(__dirname, '..', 'dist');
+
+// Ler configuração do Instagram de constants/instagram.ts
+function getInstagramMaxPosts() {
+  // Primeiro, tentar variável de ambiente
+  if (process.env.INSTAGRAM_MAX_POSTS) {
+    return parseInt(process.env.INSTAGRAM_MAX_POSTS);
+  }
+  
+  // Tentar ler do arquivo constants/instagram.ts
+  try {
+    const instagramConfigPath = path.join(__dirname, '..', 'constants', 'instagram.ts');
+    if (fs.existsSync(instagramConfigPath)) {
+      const content = fs.readFileSync(instagramConfigPath, 'utf8');
+      // Extrair maxPosts usando regex
+      const match = content.match(/maxPosts:\s*(\d+)/);
+      if (match && match[1]) {
+        const maxPosts = parseInt(match[1]);
+        console.log(`[Config] maxPosts lido de constants/instagram.ts: ${maxPosts}`);
+        return maxPosts;
+      }
+    }
+  } catch (err) {
+    console.warn(`[Config] Erro ao ler constants/instagram.ts: ${err.message}`);
+  }
+  
+  // Fallback padrão
+  return 12;
+}
+
+const INSTAGRAM_MAX_POSTS = getInstagramMaxPosts();
+console.log(`[Config] Instagram MAX_POSTS configurado: ${INSTAGRAM_MAX_POSTS}`);
 
 // Caminhos dos certificados mkcert (opcional, não necessário com Cloudflared)
 const CERT_PATH = path.join(__dirname, '..', 'localhost+2.pem');
@@ -95,24 +152,32 @@ function serveFile(req, res, filePath) {
 
 // Endpoint para buscar posts do Instagram
 async function fetchInstagramPosts(username) {
-  // Método 1: Tentar API oficial do Instagram
+  console.log(`[Instagram] Iniciando busca de posts para: ${username}`);
+  
+  // Método único: API oficial do Instagram
   try {
     const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${username}`;
+    console.log(`[Instagram] Buscando posts via API: ${apiUrl}`);
     
-    const posts = await new Promise((resolve) => {
+    const result = await new Promise((resolve) => {
       const request = https.get(apiUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
           'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Accept-Encoding': 'gzip, deflate, br',
+          'Accept-Encoding': 'gzip, deflate, br, zstd',
           'Connection': 'keep-alive',
           'Sec-Fetch-Dest': 'empty',
           'Sec-Fetch-Mode': 'cors',
           'Sec-Fetch-Site': 'same-origin',
           'X-IG-App-ID': '936619743392459',
+          'X-Requested-With': 'XMLHttpRequest',
+          'Origin': 'https://www.instagram.com',
+          'Referer': 'https://www.instagram.com/',
+          'DNT': '1',
+          'Upgrade-Insecure-Requests': '1',
         },
-        timeout: 15000,
+        timeout: 20000,
       }, (response) => {
         let data = '';
         
@@ -129,14 +194,39 @@ async function fetchInstagramPosts(username) {
         stream.on('end', () => {
           try {
             if (response.statusCode !== 200) {
-              resolve([]);
+              console.error(`[Instagram] ❌ ERRO: Status code ${response.statusCode}`);
+              let errorMessage = `Instagram retornou erro ${response.statusCode}`;
+              let errorDetails = {};
+              
+              try {
+                const errorJson = JSON.parse(data);
+                errorDetails = errorJson;
+                
+                if (response.statusCode === 401) {
+                  errorMessage = 'Instagram bloqueou a requisição (401 Unauthorized)';
+                  if (errorJson.message) {
+                    errorMessage += `: ${errorJson.message}`;
+                  }
+                } else if (response.statusCode === 403) {
+                  errorMessage = 'Instagram bloqueou a requisição (403 Forbidden)';
+                } else if (response.statusCode === 429) {
+                  errorMessage = 'Instagram está limitando requisições (429 Too Many Requests)';
+                }
+              } catch (e) {
+                errorDetails = { raw: data.substring(0, 500) };
+              }
+              
+              console.error(`[Instagram] ${errorMessage}`);
+              console.error(`[Instagram] Detalhes:`, errorDetails);
+              
+              resolve({ error: errorMessage, details: errorDetails, statusCode: response.statusCode, posts: [] });
               return;
             }
             
             const json = JSON.parse(data);
             
             if (json.data && json.data.user && json.data.user.edge_owner_to_timeline_media) {
-              const posts = json.data.user.edge_owner_to_timeline_media.edges.slice(0, 12).map((edge) => {
+              const posts = json.data.user.edge_owner_to_timeline_media.edges.slice(0, INSTAGRAM_MAX_POSTS).map((edge) => {
                 const node = edge.node;
                 return {
                   id: node.id,
@@ -148,107 +238,79 @@ async function fetchInstagramPosts(username) {
                   likes: node.edge_liked_by?.count || 0,
                 };
               });
-              resolve(posts);
+              resolve({ posts, error: null });
             } else {
-              resolve([]);
-            }
-          } catch (err) {
-            resolve([]);
-          }
-        });
-        
-        stream.on('error', () => {
-          resolve([]);
-        });
-      });
-      
-      request.on('error', () => {
-        resolve([]);
-      });
-      
-      request.on('timeout', () => {
-        request.destroy();
-        resolve([]);
-      });
-    });
-    
-    if (posts.length > 0) {
-      return posts;
-    }
-  } catch (err) {
-    // Continuar para método alternativo
-  }
-
-  // Método 2: Buscar via página HTML
-  try {
-    const profileUrl = `https://www.instagram.com/${username}/`;
-    
-    const posts = await new Promise((resolve) => {
-      const request = https.get(profileUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'pt-BR,pt;q=0.9',
-        },
-        timeout: 15000,
-      }, (response) => {
-        let html = '';
-        
-        response.on('data', (chunk) => {
-          html += chunk.toString();
-        });
-        
-        response.on('end', () => {
-          try {
-            const match = html.match(/window\._sharedData\s*=\s*({.+?});/s);
-            if (match && match[1]) {
-              const jsonData = JSON.parse(match[1]);
-              const user = jsonData?.entry_data?.ProfilePage?.[0]?.graphql?.user;
-              
-              if (user?.edge_owner_to_timeline_media?.edges) {
-                const posts = user.edge_owner_to_timeline_media.edges.slice(0, 12).map((edge) => {
-                  const node = edge.node;
-                  return {
-                    id: node.id || node.shortcode,
-                    shortcode: node.shortcode,
-                    imageUrl: node.display_url || node.thumbnail_src,
-                    caption: node.edge_media_to_caption?.edges[0]?.node?.text || '',
-                    timestamp: new Date((node.taken_at_timestamp || Date.now() / 1000) * 1000).toISOString(),
-                    permalink: `https://www.instagram.com/p/${node.shortcode}/`,
-                    likes: node.edge_liked_by?.count || 0,
-                  };
-                });
-                resolve(posts);
-              } else {
-                resolve([]);
+              console.log(`[Instagram] Estrutura de dados não encontrada`);
+              console.log(`[Instagram] JSON keys: ${Object.keys(json).join(', ')}`);
+              if (json.data) {
+                console.log(`[Instagram] json.data keys: ${Object.keys(json.data).join(', ')}`);
               }
-            } else {
-              resolve([]);
+              resolve({ 
+                error: 'Estrutura de dados do Instagram não encontrada', 
+                details: { jsonKeys: Object.keys(json) },
+                posts: [] 
+              });
             }
           } catch (err) {
-            resolve([]);
+            console.error(`[Instagram] Erro ao processar resposta:`, err.message);
+            console.log(`[Instagram] Dados recebidos (primeiros 500 chars): ${data.substring(0, 500)}`);
+            resolve({ 
+              error: `Erro ao processar resposta do Instagram: ${err.message}`,
+              details: { rawData: data.substring(0, 500) },
+              posts: [] 
+            });
           }
+        });
+        
+        stream.on('error', (err) => {
+          console.error(`[Instagram] Erro no stream:`, err.message);
+          resolve({ 
+            error: `Erro na conexão com Instagram: ${err.message}`,
+            details: { type: 'stream_error' },
+            posts: [] 
+          });
         });
       });
       
-      request.on('error', () => {
-        resolve([]);
+      request.on('error', (err) => {
+        console.error(`[Instagram] Erro na requisição:`, err.message);
+        resolve({ 
+          error: `Erro ao conectar com Instagram: ${err.message}`,
+          details: { type: 'request_error' },
+          posts: [] 
+        });
       });
       
       request.on('timeout', () => {
+        console.log(`[Instagram] Timeout na requisição`);
         request.destroy();
-        resolve([]);
+        resolve({ 
+          error: 'Timeout ao buscar posts do Instagram (requisição demorou mais de 20 segundos)',
+          details: { type: 'timeout' },
+          posts: [] 
+        });
       });
     });
     
-    if (posts.length > 0) {
-      return posts;
+    if (result.posts && result.posts.length > 0) {
+      console.log(`[Instagram] Sucesso: ${result.posts.length} posts encontrados`);
+      return result.posts;
+    } else if (result.error) {
+      console.error(`[Instagram] Erro: ${result.error}`);
+      // Retornar resultado com erro para ser tratado no endpoint
+      return result;
+    } else {
+      console.log(`[Instagram] Retornou 0 posts`);
+      return { posts: [], error: 'Nenhum post encontrado', details: {} };
     }
   } catch (err) {
-    // Retornar vazio
+    console.error(`[Instagram] Erro ao buscar posts:`, err.message);
+    return { 
+      posts: [], 
+      error: `Erro inesperado: ${err.message}`,
+      details: { type: 'exception' }
+    };
   }
-
-  return [];
 }
 
 // Proxy para imagens do Instagram (resolve problema de CORS)
@@ -256,7 +318,10 @@ function proxyImage(req, res) {
   const parsedUrl = url.parse(req.url, true);
   const imageUrl = parsedUrl.query.url;
   
+  console.log(`[Image Proxy] Requisição recebida: ${imageUrl ? imageUrl.substring(0, 100) + '...' : 'sem URL'}`);
+  
   if (!imageUrl) {
+    console.log(`[Image Proxy] Erro: URL não fornecida`);
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'URL da imagem não fornecida' }));
     return;
@@ -264,34 +329,58 @@ function proxyImage(req, res) {
   
   try {
     const urlObj = new URL(imageUrl);
+    console.log(`[Image Proxy] Hostname: ${urlObj.hostname}`);
     
     // Verificar se é uma URL do Instagram/Facebook CDN
     if (!urlObj.hostname.includes('instagram') && !urlObj.hostname.includes('fbcdn')) {
+      console.log(`[Image Proxy] Erro: URL não permitida (${urlObj.hostname})`);
       res.writeHead(403, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'URL não permitida' }));
       return;
     }
+    
+    console.log(`[Image Proxy] Buscando imagem: ${imageUrl.substring(0, 80)}...`);
     
     const request = https.get(imageUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://www.instagram.com/',
       },
+      timeout: 15000,
     }, (response) => {
-      res.writeHead(response.statusCode, {
+      console.log(`[Image Proxy] Resposta recebida: ${response.statusCode} - Content-Type: ${response.headers['content-type']}`);
+      
+      if (response.statusCode !== 200) {
+        console.log(`[Image Proxy] Erro: Status ${response.statusCode}`);
+        res.writeHead(response.statusCode, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: `Erro ao buscar imagem: ${response.statusCode}` }));
+        return;
+      }
+      
+      res.writeHead(200, {
         'Content-Type': response.headers['content-type'] || 'image/jpeg',
         'Cache-Control': 'public, max-age=86400',
         'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET',
       });
       
       response.pipe(res);
     });
     
-    request.on('error', () => {
+    request.on('error', (err) => {
+      console.error(`[Image Proxy] Erro na requisição:`, err.message);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Erro ao buscar imagem' }));
     });
+    
+    request.on('timeout', () => {
+      console.error(`[Image Proxy] Timeout ao buscar imagem`);
+      request.destroy();
+      res.writeHead(504, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Timeout ao buscar imagem' }));
+    });
   } catch (err) {
+    console.error(`[Image Proxy] Erro ao processar URL:`, err.message);
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'URL inválida' }));
   }
@@ -300,6 +389,9 @@ function proxyImage(req, res) {
 function handleRequest(req, res) {
   const parsedUrl = url.parse(req.url, true);
   let pathname = parsedUrl.pathname;
+
+  // Log de todas as requisições para debug
+  console.log(`[Request] ${req.method} ${pathname} - Host: ${req.headers.host}`);
 
   // CORS headers para todas as requisições
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -313,6 +405,18 @@ function handleRequest(req, res) {
     return;
   }
 
+  // Health check endpoint
+  if (pathname === '/health' || pathname === '/api/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ 
+      status: 'ok', 
+      server: 'webServer.js',
+      timestamp: new Date().toISOString(),
+      port: PORT 
+    }));
+    return;
+  }
+
   // Endpoint para buscar posts do Instagram
   if (pathname === '/api/instagram/posts') {
     const username = parsedUrl.query.username || 'handluzerna';
@@ -322,11 +426,54 @@ function handleRequest(req, res) {
     const host = req.headers.host || `localhost:${PORT}`;
     const baseUrl = `${protocol}://${host}`;
     
+    console.log(`[Instagram API] Requisição recebida: username=${username}, baseUrl=${baseUrl}`);
+    
     res.writeHead(200, {
       'Content-Type': 'application/json',
     });
     
-    fetchInstagramPosts(username).then((posts) => {
+    // Verificar cache primeiro
+    const cachedPosts = getCachedPosts();
+    if (cachedPosts) {
+      console.log(`[Instagram API] Retornando ${cachedPosts.length} posts do cache`);
+      const postsWithProxy = cachedPosts.map(post => ({
+        ...post,
+        imageUrl: post.imageUrl 
+          ? `${baseUrl}/api/instagram/image?url=${encodeURIComponent(post.imageUrl)}`
+          : post.imageUrl
+      }));
+      res.end(JSON.stringify({ success: true, posts: postsWithProxy, cached: true }));
+      return;
+    }
+    
+    fetchInstagramPosts(username).then((result) => {
+      // Verificar se result é um array (sucesso antigo) ou objeto com posts/error
+      let posts = [];
+      let error = null;
+      let details = {};
+      
+      if (Array.isArray(result)) {
+        // Formato antigo (compatibilidade)
+        posts = result;
+      } else if (result && typeof result === 'object') {
+        posts = result.posts || [];
+        error = result.error || null;
+        details = result.details || {};
+      }
+      
+      console.log(`[Instagram API] Posts encontrados: ${posts.length}`);
+      
+      if (error) {
+        console.error(`[Instagram API] Erro: ${error}`);
+      }
+      
+      // Salvar no cache se tiver posts
+      if (posts.length > 0) {
+        setCachedPosts(posts);
+      } else if (error) {
+        console.log(`[Instagram API] Nenhum post encontrado devido a erro: ${error}`);
+      }
+      
       // Substituir URLs das imagens por proxy
       const postsWithProxy = posts.map(post => ({
         ...post,
@@ -335,9 +482,21 @@ function handleRequest(req, res) {
           : post.imageUrl
       }));
       
-      res.end(JSON.stringify({ success: true, posts: postsWithProxy }));
+      res.end(JSON.stringify({ 
+        success: posts.length > 0, 
+        posts: postsWithProxy, 
+        cached: false,
+        error: error || null,
+        errorDetails: details
+      }));
     }).catch((err) => {
-      res.end(JSON.stringify({ success: false, error: err.message, posts: [] }));
+      console.error(`[Instagram API] Erro ao buscar posts:`, err);
+      res.end(JSON.stringify({ 
+        success: false, 
+        error: err.message, 
+        errorDetails: { type: 'exception', message: err.message },
+        posts: [] 
+      }));
     });
     
     return;
@@ -345,6 +504,7 @@ function handleRequest(req, res) {
 
   // Endpoint para proxy de imagens
   if (pathname === '/api/instagram/image') {
+    console.log(`[Instagram Image] Requisição de imagem recebida`);
     proxyImage(req, res);
     return;
   }
