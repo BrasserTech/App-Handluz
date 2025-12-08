@@ -11,6 +11,7 @@
     "web:build": "npm exec -- expo export --platform web && node scripts/setup-pwa.js",
     "web:serve": "npx serve dist",
     "web:server": "node server/webServer.js",
+    "web:build:serve": "node scripts/build-and-serve.js",
     "web:cloudflared": "powershell -ExecutionPolicy Bypass -File .\\iniciar-com-cloudflared.ps1",
     "deploy:vercel": "npm run web:build && cd dist && vercel --yes",
     "deploy:netlify": "npm run web:build && netlify deploy --prod --dir=dist",

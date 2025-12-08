@@ -93,9 +93,261 @@ function serveFile(req, res, filePath) {
   res.end(fileBuffer);
 }
 
+// Endpoint para buscar posts do Instagram
+async function fetchInstagramPosts(username) {
+  // Método 1: Tentar API oficial do Instagram
+  try {
+    const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${username}`;
+    
+    const posts = await new Promise((resolve) => {
+      const request = https.get(apiUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
+          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Sec-Fetch-Dest': 'empty',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Site': 'same-origin',
+          'X-IG-App-ID': '936619743392459',
+        },
+        timeout: 15000,
+      }, (response) => {
+        let data = '';
+        
+        let stream = response;
+        if (response.headers['content-encoding'] === 'gzip') {
+          const zlib = require('zlib');
+          stream = response.pipe(zlib.createGunzip());
+        }
+        
+        stream.on('data', (chunk) => {
+          data += chunk.toString();
+        });
+        
+        stream.on('end', () => {
+          try {
+            if (response.statusCode !== 200) {
+              resolve([]);
+              return;
+            }
+            
+            const json = JSON.parse(data);
+            
+            if (json.data && json.data.user && json.data.user.edge_owner_to_timeline_media) {
+              const posts = json.data.user.edge_owner_to_timeline_media.edges.slice(0, 12).map((edge) => {
+                const node = edge.node;
+                return {
+                  id: node.id,
+                  shortcode: node.shortcode,
+                  imageUrl: node.display_url || node.thumbnail_src,
+                  caption: node.edge_media_to_caption?.edges[0]?.node?.text || '',
+                  timestamp: new Date(node.taken_at_timestamp * 1000).toISOString(),
+                  permalink: `https://www.instagram.com/p/${node.shortcode}/`,
+                  likes: node.edge_liked_by?.count || 0,
+                };
+              });
+              resolve(posts);
+            } else {
+              resolve([]);
+            }
+          } catch (err) {
+            resolve([]);
+          }
+        });
+        
+        stream.on('error', () => {
+          resolve([]);
+        });
+      });
+      
+      request.on('error', () => {
+        resolve([]);
+      });
+      
+      request.on('timeout', () => {
+        request.destroy();
+        resolve([]);
+      });
+    });
+    
+    if (posts.length > 0) {
+      return posts;
+    }
+  } catch (err) {
+    // Continuar para método alternativo
+  }
+
+  // Método 2: Buscar via página HTML
+  try {
+    const profileUrl = `https://www.instagram.com/${username}/`;
+    
+    const posts = await new Promise((resolve) => {
+      const request = https.get(profileUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'pt-BR,pt;q=0.9',
+        },
+        timeout: 15000,
+      }, (response) => {
+        let html = '';
+        
+        response.on('data', (chunk) => {
+          html += chunk.toString();
+        });
+        
+        response.on('end', () => {
+          try {
+            const match = html.match(/window\._sharedData\s*=\s*({.+?});/s);
+            if (match && match[1]) {
+              const jsonData = JSON.parse(match[1]);
+              const user = jsonData?.entry_data?.ProfilePage?.[0]?.graphql?.user;
+              
+              if (user?.edge_owner_to_timeline_media?.edges) {
+                const posts = user.edge_owner_to_timeline_media.edges.slice(0, 12).map((edge) => {
+                  const node = edge.node;
+                  return {
+                    id: node.id || node.shortcode,
+                    shortcode: node.shortcode,
+                    imageUrl: node.display_url || node.thumbnail_src,
+                    caption: node.edge_media_to_caption?.edges[0]?.node?.text || '',
+                    timestamp: new Date((node.taken_at_timestamp || Date.now() / 1000) * 1000).toISOString(),
+                    permalink: `https://www.instagram.com/p/${node.shortcode}/`,
+                    likes: node.edge_liked_by?.count || 0,
+                  };
+                });
+                resolve(posts);
+              } else {
+                resolve([]);
+              }
+            } else {
+              resolve([]);
+            }
+          } catch (err) {
+            resolve([]);
+          }
+        });
+      });
+      
+      request.on('error', () => {
+        resolve([]);
+      });
+      
+      request.on('timeout', () => {
+        request.destroy();
+        resolve([]);
+      });
+    });
+    
+    if (posts.length > 0) {
+      return posts;
+    }
+  } catch (err) {
+    // Retornar vazio
+  }
+
+  return [];
+}
+
+// Proxy para imagens do Instagram (resolve problema de CORS)
+function proxyImage(req, res) {
+  const parsedUrl = url.parse(req.url, true);
+  const imageUrl = parsedUrl.query.url;
+  
+  if (!imageUrl) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'URL da imagem não fornecida' }));
+    return;
+  }
+  
+  try {
+    const urlObj = new URL(imageUrl);
+    
+    // Verificar se é uma URL do Instagram/Facebook CDN
+    if (!urlObj.hostname.includes('instagram') && !urlObj.hostname.includes('fbcdn')) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'URL não permitida' }));
+      return;
+    }
+    
+    const request = https.get(imageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.instagram.com/',
+      },
+    }, (response) => {
+      res.writeHead(response.statusCode, {
+        'Content-Type': response.headers['content-type'] || 'image/jpeg',
+        'Cache-Control': 'public, max-age=86400',
+        'Access-Control-Allow-Origin': '*',
+      });
+      
+      response.pipe(res);
+    });
+    
+    request.on('error', () => {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Erro ao buscar imagem' }));
+    });
+  } catch (err) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'URL inválida' }));
+  }
+}
+
 function handleRequest(req, res) {
   const parsedUrl = url.parse(req.url, true);
   let pathname = parsedUrl.pathname;
+
+  // CORS headers para todas as requisições
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Handle preflight
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
+
+  // Endpoint para buscar posts do Instagram
+  if (pathname === '/api/instagram/posts') {
+    const username = parsedUrl.query.username || 'handluzerna';
+    
+    // Detectar protocolo e host da requisição
+    const protocol = req.headers['x-forwarded-proto'] || (useHTTPS ? 'https' : 'http');
+    const host = req.headers.host || `localhost:${PORT}`;
+    const baseUrl = `${protocol}://${host}`;
+    
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+    });
+    
+    fetchInstagramPosts(username).then((posts) => {
+      // Substituir URLs das imagens por proxy
+      const postsWithProxy = posts.map(post => ({
+        ...post,
+        imageUrl: post.imageUrl 
+          ? `${baseUrl}/api/instagram/image?url=${encodeURIComponent(post.imageUrl)}`
+          : post.imageUrl
+      }));
+      
+      res.end(JSON.stringify({ success: true, posts: postsWithProxy }));
+    }).catch((err) => {
+      res.end(JSON.stringify({ success: false, error: err.message, posts: [] }));
+    });
+    
+    return;
+  }
+
+  // Endpoint para proxy de imagens
+  if (pathname === '/api/instagram/image') {
+    proxyImage(req, res);
+    return;
+  }
 
   // Remover query string
   pathname = pathname.split('?')[0];

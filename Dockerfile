@@ -9,13 +9,19 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
-# Copiar código fonte (volumes serão montados em desenvolvimento)
+# Copiar código fonte
 COPY . .
 
+# Compilar o app para web
+RUN npm run web:build
+
 # Expor porta
-EXPOSE 4500
+EXPOSE 3000
 
 # Variáveis de ambiente
-ENV PORT=4500
+ENV PORT=3000
 ENV FORCE_HTTP=true
-ENV NODE_ENV=${NODE_ENV:-production}
+ENV NODE_ENV=production
+
+# Comando para iniciar o servidor
+CMD ["node", "server/webServer.js"]

@@ -7,30 +7,31 @@ import {
   StyleSheet,
   Image,
   ScrollView,
-  ActivityIndicator,
   Alert,
   TouchableOpacity,
   Linking,
+  ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
+import { INSTAGRAM_URL, INSTAGRAM_USERNAME, INSTAGRAM_GRID_CONFIG } from '../../constants/instagram';
+import { fetchInstagramPosts, InstagramPost } from '../services/instagramService';
+
+const { width } = Dimensions.get('window');
+const POST_WIDTH = ((width - INSTAGRAM_GRID_CONFIG.padding) / INSTAGRAM_GRID_CONFIG.columns) * INSTAGRAM_GRID_CONFIG.sizeMultiplier;
 
 // LOGO
 const handluzLogo = require('../../assets/images/logo_handluz.png');
-
-// --- CONFIGURAÇÕES DA META / FACEBOOK ---
-const APP_ID = '1573304237189416';
-const APP_SECRET = 'b0032bdd45552be2364e261d508a71e8'; 
-// A URL abaixo deve ser idêntica à cadastrada em "Login do Facebook > Configurações"
-const REDIRECT_URI = 'https://app.handluz.brassertech.com.br/auth/callback';
 
 // TYPES
 type Team = { id: string; name: string; };
 type SummaryStats = { athletes: number; teams: number; trainingsMonth: number; };
 type Competition = { id: string; name: string | null; category: string | null; location: string | null; start_date: string | null; end_date: string | null; pdf_url: string | null; };
+
 
 // HELPERS DE DATA
 function toIsoDate(d: Date): string { return d.toISOString().slice(0, 10); }
@@ -57,161 +58,53 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState<boolean>(false);
 
   // --- ESTADOS DO INSTAGRAM ---
-  const [instagramPosts, setInstagramPosts] = useState<any[]>([]);
+  const [instagramPosts, setInstagramPosts] = useState<InstagramPost[]>([]);
   const [instagramLoading, setInstagramLoading] = useState<boolean>(false);
-  const [isConnected, setIsConnected] = useState<boolean>(false);
 
   // Carrega dados iniciais
   useEffect(() => {
     loadHomeData();
+    loadInstagramPosts();
   }, []);
 
-  // --- LÓGICA DE AUTENTICAÇÃO (OAUTH) ---
-
-  // 1. Escuta o retorno do navegador (Deep Link)
-  useEffect(() => {
-    const handleUrl = async ({ url }: { url: string }) => {
-      console.log('[DEBUG INSTA] URL recebida:', url);
-      
-      // Verifica se a URL pertence ao nosso callback
-      if (url && url.startsWith(REDIRECT_URI)) {
-        // Tenta extrair o código ?code=...
-        const regex = /[?&]code=([^#&]+)/;
-        const match = url.match(regex);
-        
-        if (match && match[1]) {
-          const code = match[1];
-          console.log('[DEBUG INSTA] Code extraído:', code);
-          await exchangeCodeForToken(code);
-        } else {
-          console.log('[DEBUG INSTA] Nenhum code encontrado na URL.');
-        }
-      }
-    };
-
-    // Adiciona o ouvinte
-    const subscription = Linking.addEventListener('url', handleUrl);
-    return () => {
-      subscription.remove();
-    };
-  }, []);
-
-  // 2. Inicia o Login (Botão Conectar)
-  const initiateInstagramConnection = async () => {
-    if (isConnected) return;
-    
-    console.log('[DEBUG INSTA] Iniciando login...');
+  // Função para buscar posts do Instagram
+  async function loadInstagramPosts() {
     setInstagramLoading(true);
-    
-    // Scopes corrigidos: Apenas o básico e páginas (sem mensagens para evitar erro extra)
-    // Se o erro "Invalid Scopes" persistir, verifique se 'instagram_basic' e 'pages_show_list'
-    // foram adicionados no painel "Casos de Uso" da Meta.
-    const scopes = 'instagram_basic,pages_show_list';
-    
-    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
-    
     try {
-      const supported = await Linking.canOpenURL(authUrl);
-      if (supported) {
-        await Linking.openURL(authUrl);
-      } else {
-        Alert.alert('Erro', 'Navegador não suportado.');
-        setInstagramLoading(false);
-      }
+      const posts = await fetchInstagramPosts();
+      setInstagramPosts(posts);
     } catch (err) {
-      console.error('[DEBUG INSTA] Erro ao abrir link:', err);
-      setInstagramLoading(false);
-    }
-  };
-
-  // 3. Troca o Code pelo Token
-  const exchangeCodeForToken = async (code: string) => {
-    try {
-      console.log('[DEBUG INSTA] Trocando code por token...');
-      const cleanCode = code.replace('#_', '');
-      
-      const tokenUrl = `https://graph.facebook.com/v18.0/oauth/access_token?client_id=${APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&client_secret=${APP_SECRET}&code=${cleanCode}`;
-      
-      const response = await fetch(tokenUrl);
-      const data = await response.json();
-
-      if (data.access_token) {
-        console.log('[DEBUG INSTA] Token obtido!');
-        await fetchInstagramAccountId(data.access_token);
-      } else {
-        console.error('[DEBUG INSTA] Erro no token:', data);
-        Alert.alert('Erro', 'Falha na autenticação com Facebook.');
-        setInstagramLoading(false);
-      }
-    } catch (error) {
-      console.error('[DEBUG INSTA] Erro de rede:', error);
-      setInstagramLoading(false);
-    }
-  };
-
-  // 4. Busca o ID do Instagram Business vinculado
-  const fetchInstagramAccountId = async (accessToken: string) => {
-    try {
-      console.log('[DEBUG INSTA] Buscando contas...');
-      // Pega as páginas do usuário
-      const pagesUrl = `https://graph.facebook.com/v18.0/me/accounts?access_token=${accessToken}`;
-      const pagesResp = await fetch(pagesUrl);
-      const pagesData = await pagesResp.json();
-
-      let instagramBizId = null;
-
-      if (pagesData.data) {
-        // Varre as páginas para achar qual tem Instagram conectado
-        for (const page of pagesData.data) {
-           const pageDetailsUrl = `https://graph.facebook.com/v18.0/${page.id}?fields=instagram_business_account&access_token=${accessToken}`;
-           const detailResp = await fetch(pageDetailsUrl);
-           const detailData = await detailResp.json();
-           
-           if (detailData.instagram_business_account) {
-             instagramBizId = detailData.instagram_business_account.id;
-             console.log('[DEBUG INSTA] ID do Instagram encontrado:', instagramBizId);
-             break;
-           }
-        }
-      }
-
-      if (instagramBizId) {
-        setIsConnected(true);
-        await fetchInstagramMedia(instagramBizId, accessToken);
-      } else {
-        Alert.alert('Atenção', 'Nenhuma conta Instagram Business vinculada encontrada.');
-        setInstagramLoading(false);
-      }
-    } catch (err) {
-      console.error('[DEBUG INSTA] Erro ao buscar ID:', err);
-      setInstagramLoading(false);
-    }
-  };
-
-  // 5. Busca as fotos/feed
-  const fetchInstagramMedia = async (instagramId: string, accessToken: string) => {
-    try {
-      console.log('[DEBUG INSTA] Buscando fotos...');
-      const fields = 'id,caption,media_type,media_url,permalink,timestamp,thumbnail_url';
-      const url = `https://graph.facebook.com/v18.0/${instagramId}/media?fields=${fields}&access_token=${accessToken}&limit=6`;
-      
-      const response = await fetch(url);
-      const json = await response.json();
-      
-      if (json.data) {
-        const formattedPosts = json.data.map((item: any) => ({
-          id: item.id,
-          imageUrl: item.media_type === 'VIDEO' ? item.thumbnail_url : item.media_url,
-          caption: item.caption || '',
-          takenAt: item.timestamp,
-          permalink: item.permalink
-        }));
-        setInstagramPosts(formattedPosts);
-      }
-    } catch (err) {
-      console.error('[DEBUG INSTA] Erro ao carregar feed:', err);
+      console.error('Erro ao buscar posts do Instagram:', err);
+      setInstagramPosts([]);
     } finally {
       setInstagramLoading(false);
+    }
+  }
+
+  // Função para abrir o Instagram
+  const handleOpenInstagram = async () => {
+    try {
+      const supported = await Linking.canOpenURL(INSTAGRAM_URL);
+      if (supported) {
+        await Linking.openURL(INSTAGRAM_URL);
+      } else {
+        Alert.alert('Erro', 'Não foi possível abrir o Instagram.');
+      }
+    } catch (err) {
+      console.error('Erro ao abrir Instagram:', err);
+      Alert.alert('Erro', 'Não foi possível abrir o Instagram.');
+    }
+  };
+
+  // Função para abrir um post específico
+  const handleOpenPost = async (permalink: string) => {
+    try {
+      const supported = await Linking.canOpenURL(permalink);
+      if (supported) {
+        await Linking.openURL(permalink);
+      }
+    } catch (err) {
+      console.error('Erro ao abrir post:', err);
     }
   };
 
@@ -295,49 +188,66 @@ export default function HomeScreen() {
       {/* FEED INSTAGRAM */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 10 }}>
         <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>FEED DO INSTAGRAM</Text>
-        
-        {/* Botão de Conectar */}
-        {!isConnected && (
-           <TouchableOpacity onPress={initiateInstagramConnection} style={styles.connectButton} disabled={instagramLoading}>
-             {instagramLoading ? (
-                <ActivityIndicator size="small" color="#FFF" />
-             ) : (
-                <>
-                  <Ionicons name="logo-instagram" size={16} color="#FFF" style={{ marginRight: 6 }} />
-                  <Text style={styles.connectButtonText}>Conectar</Text>
-                </>
-             )}
-           </TouchableOpacity>
-        )}
+        <TouchableOpacity onPress={handleOpenInstagram} style={styles.instagramHeaderButton}>
+          <Ionicons name="logo-instagram" size={16} color="#E1306C" style={{ marginRight: 4 }} />
+          <Text style={styles.instagramHeaderButtonText}>@{INSTAGRAM_USERNAME}</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.instagramCard}>
         {instagramLoading ? (
-          <View style={{ padding: 20, alignItems: 'center' }}>
+          <View style={{ padding: 40, alignItems: 'center' }}>
             <ActivityIndicator size="large" color={AppTheme.primary} />
-            <Text style={{ marginTop: 10, fontSize: 12, color: AppTheme.textSecondary }}>Aguardando Facebook...</Text>
-          </View>
-        ) : instagramPosts.length === 0 ? (
-          <View style={{ padding: 20, alignItems: 'center' }}>
-            <Text style={{ color: AppTheme.textSecondary, textAlign: 'center' }}>
-              {isConnected ? 'Nenhuma publicação recente.' : 'Conecte para ver o feed oficial.'}
+            <Text style={{ marginTop: 12, fontSize: 14, color: AppTheme.textSecondary }}>
+              Carregando posts...
             </Text>
           </View>
-        ) : (
-          <View style={styles.instagramVerticalList}>
-            {instagramPosts.map(post => (
-              <TouchableOpacity key={post.id} style={styles.instagramPostCard} onPress={() => post.permalink && handleOpenUrl(post.permalink)}>
-                {post.imageUrl && (
-                  <Image source={{ uri: post.imageUrl }} style={styles.instagramImage} resizeMode="cover" />
-                )}
-                <View style={styles.instagramPostBody}>
-                  <Text numberOfLines={3} style={styles.instagramCaption}>{post.caption}</Text>
-                  {post.takenAt && (
-                    <Text style={styles.instagramDate}>{formatInstagramDate(post.takenAt)}</Text>
-                  )}
-                </View>
+        ) : instagramPosts.length === 0 ? (
+          <View style={{ padding: 24, alignItems: 'center' }}>
+            <View style={styles.instagramEmptyCard}>
+              <Ionicons name="logo-instagram" size={56} color="#E1306C" style={{ marginBottom: 16 }} />
+              <Text style={{ color: AppTheme.textPrimary, textAlign: 'center', fontSize: 18, fontWeight: '700', marginBottom: 8 }}>
+                @{INSTAGRAM_USERNAME}
+              </Text>
+              <Text style={{ color: AppTheme.textSecondary, textAlign: 'center', fontSize: 14, marginBottom: 24, lineHeight: 20 }}>
+                Siga-nos no Instagram para acompanhar todas as novidades, fotos dos treinos, competições e muito mais!
+              </Text>
+              <TouchableOpacity onPress={handleOpenInstagram} style={styles.instagramButton}>
+                <Ionicons name="logo-instagram" size={22} color="#FFF" style={{ marginRight: 10 }} />
+                <Text style={styles.instagramButtonText}>Seguir no Instagram</Text>
               </TouchableOpacity>
-            ))}
+            </View>
+          </View>
+        ) : (
+          <View>
+            <View style={styles.instagramGrid}>
+              {instagramPosts.map((post) => (
+                <TouchableOpacity
+                  key={post.id}
+                  style={styles.instagramPostItem}
+                  onPress={() => handleOpenPost(post.permalink)}
+                  activeOpacity={0.7}
+                >
+                  <Image
+                    source={{ uri: post.imageUrl }}
+                    style={styles.instagramPostImage}
+                    resizeMode="cover"
+                  />
+                  <View style={styles.instagramPostOverlay}>
+                    <View style={styles.instagramPostStats}>
+                      <Ionicons name="heart" size={12} color="#FFF" />
+                      <Text style={styles.instagramPostStatsText}>
+                        {post.likes > 1000 ? `${(post.likes / 1000).toFixed(1)}k` : post.likes}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity onPress={handleOpenInstagram} style={styles.instagramViewMoreButton}>
+              <Text style={styles.instagramViewMoreText}>Ver mais no Instagram</Text>
+              <Ionicons name="arrow-forward" size={16} color={AppTheme.primary} />
+            </TouchableOpacity>
           </View>
         )}
       </View>
@@ -362,13 +272,35 @@ const styles = StyleSheet.create({
   categoriesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   categoryButton: { width: '30%', aspectRatio: 1, backgroundColor: AppTheme.primary, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   categoryText: { marginTop: 6, color: '#FFF', fontWeight: '600', fontSize: 11 },
-  connectButton: { backgroundColor: '#E1306C', flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
-  connectButtonText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
   instagramCard: { backgroundColor: AppTheme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: AppTheme.border, minHeight: 100 },
-  instagramVerticalList: { gap: 16 },
-  instagramPostCard: { borderRadius: 14, backgroundColor: '#fff', overflow: 'hidden', borderWidth: 1, borderColor: AppTheme.border },
-  instagramImage: { width: '100%', height: 260 },
-  instagramPostBody: { padding: 10 },
-  instagramCaption: { fontSize: 13, color: AppTheme.textPrimary },
-  instagramDate: { fontSize: 11, color: AppTheme.textSecondary, marginTop: 4 },
+  instagramEmptyCard: { width: '100%', alignItems: 'center', paddingVertical: 8 },
+  instagramHeaderButton: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 8 },
+  instagramHeaderButtonText: { color: '#E1306C', fontSize: 12, fontWeight: '600' },
+  instagramButton: { backgroundColor: '#E1306C', flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 32, borderRadius: 30, shadowColor: '#E1306C', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  instagramButtonText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+  instagramGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: INSTAGRAM_GRID_CONFIG.gap },
+  instagramPostItem: { width: POST_WIDTH, height: POST_WIDTH, position: 'relative', borderRadius: 8, overflow: 'hidden' },
+  instagramPostImage: { width: '100%', height: '100%' },
+  instagramPostOverlay: { 
+    position: 'absolute', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0, 
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-start',
+    padding: 6,
+  },
+  instagramPostStats: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  instagramPostStatsText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
+  instagramViewMoreButton: { 
+    marginTop: 12, 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    paddingVertical: 12,
+    gap: 6,
+  },
+  instagramViewMoreText: { color: AppTheme.primary, fontSize: 14, fontWeight: '600' },
 });
