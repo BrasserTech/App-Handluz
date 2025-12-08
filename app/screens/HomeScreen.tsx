@@ -24,6 +24,10 @@ import { fetchInstagramPosts, InstagramPost } from '../services/instagramService
 const { width } = Dimensions.get('window');
 const POST_WIDTH = ((width - INSTAGRAM_GRID_CONFIG.padding) / INSTAGRAM_GRID_CONFIG.columns) * INSTAGRAM_GRID_CONFIG.sizeMultiplier;
 
+// Detectar se é tela grande (computador) - ajustar tamanho das categorias
+const isDesktop = width > 768; // Breakpoint comum para tablets/desktop
+const CATEGORY_WIDTH = isDesktop ? '10%' : '30%'; // Menor no desktop, normal no mobile
+
 // LOGO
 const handluzLogo = require('../../assets/images/logo_handluz.png');
 
@@ -270,7 +274,7 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 12, color: AppTheme.textSecondary },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: AppTheme.textPrimary, marginBottom: 10 },
   categoriesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  categoryButton: { width: '30%', aspectRatio: 1, backgroundColor: AppTheme.primary, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  categoryButton: { width: CATEGORY_WIDTH, aspectRatio: 1, backgroundColor: AppTheme.primary, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   categoryText: { marginTop: 6, color: '#FFF', fontWeight: '600', fontSize: 11 },
   instagramCard: { backgroundColor: AppTheme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: AppTheme.border, minHeight: 100 },
   instagramEmptyCard: { width: '100%', alignItems: 'center', paddingVertical: 8 },
