@@ -22,8 +22,8 @@ function HeaderProfileButton() {
   const { user } = useAuth();
 
   function handlePress() {
-    if (user) navigation.navigate('Profile' as any);
-    else navigation.navigate('Login' as any);
+    // Sempre navega para a tab Perfil do BottomTabs
+    navigation.navigate('AppTabs' as any, { screen: 'Perfil' });
   }
 
   return (

@@ -18,14 +18,14 @@ const Stack = createNativeStackNavigator<HomeStackParamList>();
 
 /**
  * Botão de perfil no header do stack Home.
- * Tipagem do useNavigation permite chamar navigate('Profile') sem casts.
+ * Navega para a tab Perfil do BottomTabs.
  */
 function HeaderProfileButton() {
   const navigation = useNavigation<NavigationProp<Record<string, object | undefined>>>();
 
   function handlePress() {
-    // Ajuste o destino se sua rota Profile estiver em outro navigator
-    navigation.navigate('Profile');
+    // Navega para a tab Perfil do BottomTabs
+    navigation.navigate('AppTabs' as any, { screen: 'Perfil' });
   }
 
   return (

@@ -86,7 +86,8 @@ export default function LoginScreen() {
     setSubmitting(false);
 
     if (ok) {
-      navigation.goBack();
+      // Navega para a tela de Perfil após login bem-sucedido
+      navigation.navigate('ProfileMain' as never);
     }
   }
 

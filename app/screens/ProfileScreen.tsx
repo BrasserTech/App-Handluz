@@ -61,7 +61,7 @@ export default function ProfileScreen() {
         </Text>
         <TouchableOpacity
           style={styles.loginButton}
-          onPress={() => navigation.navigate('Login' as never)}
+          onPress={() => navigation.navigate('AppTabs' as never, { screen: 'Perfil' })}
           activeOpacity={0.9}
         >
           <Text style={styles.loginButtonText}>Ir para Login</Text>
@@ -123,8 +123,8 @@ export default function ProfileScreen() {
     setLoggingOut(true);
     try {
       await signOut();
-      // Navega para a tela de login após logout
-      navigation.navigate('Login' as never);
+      // O ProfileStackNavigator detecta automaticamente a mudança de estado
+      // e navega para LoginMain quando o usuário é removido
     } catch (err) {
       console.error('[ProfileScreen] Erro ao fazer logout:', err);
       setError('Erro ao fazer logout. Tente novamente.');

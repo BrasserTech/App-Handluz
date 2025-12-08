@@ -11,14 +11,10 @@ import { View, Text, StyleSheet, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import AppNavigator from './AppNavigator';
-import LoginScreen from '../screens/LoginScreen';
-import ProfileScreen from '../screens/ProfileScreen';
 import { AppTheme } from '../../constants/theme';
 
 export type RootDrawerParamList = {
   AppTabs: undefined;
-  Login: undefined;
-  Profile: undefined;
 };
 
 const Drawer = createDrawerNavigator<RootDrawerParamList>();
@@ -120,31 +116,8 @@ export default function DrawerNavigator() {
         <CustomDrawerContent {...props} />
       )}
     >
-      {/* Tabs principais */}
+      {/* Tabs principais - Login e Perfil estão dentro do AppTabs */}
       <Drawer.Screen name="AppTabs" component={AppNavigator} />
-
-      {/* Tela de Login (não aparece no menu lateral) */}
-      <Drawer.Screen
-        name="Login"
-        component={LoginScreen}
-        options={{
-          drawerItemStyle: { display: 'none' },
-        }}
-      />
-
-      {/* Tela de Perfil (não aparece no menu lateral) */}
-      <Drawer.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{
-          drawerItemStyle: { display: 'none' },
-          headerShown: true,
-          title: 'Perfil',
-          headerStyle: { backgroundColor: AppTheme.primary },
-          headerTintColor: '#FFFFFF',
-          headerTitleStyle: { color: '#FFFFFF', fontWeight: '600' },
-        }}
-      />
     </Drawer.Navigator>
   );
 }
