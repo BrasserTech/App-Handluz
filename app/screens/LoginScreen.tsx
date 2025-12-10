@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
+import LogoHandluz from '../../logo_handluz.png';
 import { useAuth } from '../context/AuthContext';
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
@@ -186,9 +186,7 @@ export default function LoginScreen() {
       <View style={styles.loggedRoot}>
         <View style={styles.card}>
           <Image
-            source={{
-              uri: 'https://images.pexels.com/photos/114296/pexels-photo-114296.jpeg',
-            }}
+            source={LogoHandluz}
             style={styles.heroImage}
           />
 
@@ -236,9 +234,7 @@ export default function LoginScreen() {
       <View style={styles.card}>
         {/* IMAGEM DE DESTAQUE */}
         <Image
-          source={{
-            uri: 'https://images.pexels.com/photos/114296/pexels-photo-114296.jpeg',
-          }}
+          source={LogoHandluz}
           style={styles.heroImage}
         />
 
@@ -377,12 +373,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 3,
   },
-  heroImage: {
-    width: '100%',
-    height: 150,
-    borderRadius: 14,
-    marginBottom: 16,
-  },
+heroImage: {
+  width: 120,          // tamanho ideal para logos quadradas
+  height: 120,
+  alignSelf: 'center',
+  marginBottom: 16,
+  resizeMode: 'contain',
+},
   title: {
     fontSize: 22,
     fontWeight: '700',
