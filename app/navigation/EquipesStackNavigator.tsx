@@ -1,15 +1,14 @@
-// app/navigation/EquipesStackNavigator.tsx
-
 import React from 'react';
-import { TouchableOpacity, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, type NavigationProp, CommonActions } from '@react-navigation/native';
+import { NavigationProp } from '@react-navigation/native';
 
 import EquipesListScreen from '../screens/EquipesListScreen';
 import EquipeAtletasScreen from '../screens/EquipeAtletasScreen';
 import { AppTheme } from '../../constants/theme';
-import { useAuth } from '../context/AuthContext';
+
+// Importa o componente global que criamos
+import { HeaderProfile } from '../../components/HeaderProfile';
 
 export type EquipesStackParamList = {
   EquipesList: undefined;
@@ -21,48 +20,17 @@ export type EquipesStackParamList = {
 
 const Stack = createNativeStackNavigator<EquipesStackParamList>();
 
-function HeaderProfileButton() {
-  const navigation = useNavigation<NavigationProp<Record<string, object | undefined>>>();
-  const { user } = useAuth();
-
-  function handlePress() {
-    // Sempre navega para a tab Perfil do BottomTabs
-    navigation.navigate('AppTabs' as any, { screen: 'Perfil' });
-  }
-
-  return (
-    <TouchableOpacity onPress={handlePress} style={styles.headerRightButton}>
-      <Ionicons name={user ? 'person' : 'person-circle-outline'} size={26} color="#FFFFFF" />
-    </TouchableOpacity>
-  );
-}
-
-function HeaderBackButton() {
-  const navigation = useNavigation<NavigationProp<Record<string, object | undefined>>>();
-
-  if (!navigation.canGoBack()) {
-    return null;
-  }
-
-  return (
-    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerLeftButton}>
-      <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
-    </TouchableOpacity>
-  );
-}
-
 /**
- * Função para navegar para EquipeAtletas garantindo que seja dentro do stack Equipes,
- * permitindo que o botão voltar retorne para EquipesList.
+ * Função utilitária para navegação (opcional, mas mantida para compatibilidade com seu código)
  */
 export function navigateToEquipeAtletas(
   navigation: NavigationProp<any>,
   equipeId: string,
   equipeNome?: string
 ) {
-  navigation.navigate('Equipes', {
-    screen: 'EquipeAtletas',
-    params: { equipeId, equipeNome },
+  navigation.navigate('EquipeAtletas', {
+    equipeId,
+    equipeNome,
   });
 }
 
@@ -75,9 +43,13 @@ export default function EquipesStackNavigator() {
         headerStyle: { backgroundColor: AppTheme.primary },
         headerTintColor: '#FFFFFF',
         headerTitleStyle: { fontWeight: '600' },
-        headerLeft: () => <HeaderBackButton />,
-        headerRight: () => <HeaderProfileButton />,
-        headerBackTitleVisible: false,
+        headerShadowVisible: false, // Remove a sombra para ficar igual à Home
+        
+        // Remove o texto "Voltar" (iOS) ou ajusta o padrão
+        headerBackTitle: '',
+        
+        // Adiciona o botão de perfil global (Nome + Ícone)
+        headerRight: () => <HeaderProfile />,
       }}
     >
       <Stack.Screen
@@ -85,6 +57,7 @@ export default function EquipesStackNavigator() {
         component={EquipesListScreen}
         options={{ title: 'Equipes' }}
       />
+      
       <Stack.Screen
         name="EquipeAtletas"
         component={EquipeAtletasScreen}
@@ -97,11 +70,5 @@ export default function EquipesStackNavigator() {
 }
 
 const styles = StyleSheet.create({
-  headerLeftButton: {
-    paddingLeft: 12,
-    paddingRight: 8,
-  },
-  headerRightButton: {
-    paddingRight: 12,
-  },
+  // Estilos removidos pois agora usamos componentes padrões
 });

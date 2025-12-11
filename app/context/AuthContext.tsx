@@ -1,18 +1,9 @@
-// app/context/AuthContext.tsx
-// Autenticação customizada baseada em public.profiles + public.passwords
-// NÃO usa supabase.auth nem auth.users.
-
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  ReactNode,
-} from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../services/supabaseClient';
 
-export type HandluzRole = 'usuario' | 'diretoria' | 'admin';
+// TIPO ATUALIZADO: Inclui todas as possibilidades para evitar erros de TypeScript
+export type HandluzRole = 'usuario' | 'diretoria' | 'admin' | 'atleta';
 
 export interface AuthUser {
   id: string;
@@ -20,6 +11,8 @@ export interface AuthUser {
   fullName: string;
   role: HandluzRole;
   isBoard: boolean;
+  isAthlete: boolean;
+  isUser: boolean;
 }
 
 interface AuthContextValue {
@@ -32,186 +25,90 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
-
-interface Props {
-  children: ReactNode;
-}
-
 const STORAGE_USER_KEY = 'handluz_auth_user';
 
-export function AuthProvider({ children }: Props) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState<boolean>(true); // Inicia como true para carregar estado salvo
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Carrega o usuário salvo quando o componente é montado
-  useEffect(() => {
-    loadSavedUser();
-  }, []);
+  useEffect(() => { loadSavedUser(); }, []);
 
   async function loadSavedUser() {
     try {
       const savedUserJson = await AsyncStorage.getItem(STORAGE_USER_KEY);
       if (savedUserJson) {
         const savedUser: AuthUser = JSON.parse(savedUserJson);
-        // Verifica se o perfil ainda existe no banco
-        const { data: profile, error: profileError } = await supabase
+        const { data: profile } = await supabase
           .from('profiles')
-          .select('id, email, full_name, role, is_board')
+          .select('id, email, full_name, role, is_board, is_athlete, is_user')
           .eq('id', savedUser.id)
           .single();
 
-        if (!profileError && profile) {
-          // Atualiza com dados mais recentes
+        if (profile) {
           const authUser: AuthUser = {
             id: profile.id,
             email: profile.email,
             fullName: profile.full_name,
             role: (profile.role as HandluzRole) ?? 'usuario',
             isBoard: !!profile.is_board,
+            isAthlete: !!profile.is_athlete,
+            isUser: !!profile.is_user,
           };
           setUser(authUser);
-          // Salva novamente com dados atualizados
           await AsyncStorage.setItem(STORAGE_USER_KEY, JSON.stringify(authUser));
         } else {
-          // Perfil não existe mais, remove do storage
           await AsyncStorage.removeItem(STORAGE_USER_KEY);
         }
       }
-    } catch (e) {
-      console.error('[AuthContext] Erro ao carregar usuário salvo:', e);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { console.error(e); } finally { setLoading(false); }
   }
 
   async function saveUser(userData: AuthUser | null) {
-    try {
-      if (userData) {
-        await AsyncStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userData));
-      } else {
-        await AsyncStorage.removeItem(STORAGE_USER_KEY);
-      }
-    } catch (e) {
-      console.error('[AuthContext] Erro ao salvar usuário:', e);
-    }
+    if (userData) await AsyncStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userData));
+    else await AsyncStorage.removeItem(STORAGE_USER_KEY);
   }
 
   async function signIn(email: string, password: string): Promise<boolean> {
     setLoading(true);
-    setError(null);
-
     try {
-      // 1) Busca perfil pelo e-mail
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, email, full_name, role, is_board')
-        .eq('email', email.trim())
-        .single();
+      const { data: profile } = await supabase.from('profiles').select('*').eq('email', email.trim()).single();
+      if (!profile) return false;
 
-      if (profileError || !profile) {
-        setError('Usuário não encontrado.');
-        return false;
-      }
+      const { data: passRow } = await supabase.from('passwords').select('*').eq('profile_id', profile.id).single();
+      if (!passRow || passRow.password !== password) return false;
 
-      // 2) Busca senha na tabela passwords
-      const { data: passRow, error: passError } = await supabase
-        .from('passwords')
-        .select('id, password')
-        .eq('profile_id', profile.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (passError || !passRow) {
-        setError('Senha não cadastrada para este usuário.');
-        return false;
-      }
-
-      if (passRow.password !== password) {
-        setError('E-mail ou senha inválidos.');
-        return false;
-      }
-
-      // 3) Login bem-sucedido
       const authUser: AuthUser = {
         id: profile.id,
         email: profile.email,
         fullName: profile.full_name,
         role: (profile.role as HandluzRole) ?? 'usuario',
         isBoard: !!profile.is_board,
+        isAthlete: !!profile.is_athlete,
+        isUser: !!profile.is_user,
       };
-
       setUser(authUser);
-      await saveUser(authUser); // Salva no AsyncStorage
-      setError(null);
+      await saveUser(authUser);
       return true;
-    } catch (e: any) {
-      console.error('[AuthContext] Erro inesperado no signIn:', e);
-      setError('Erro inesperado ao tentar fazer login.');
-      return false;
-    } finally {
-      setLoading(false);
-    }
+    } catch { return false; } finally { setLoading(false); }
   }
 
-  async function signOut(): Promise<void> {
-    setLoading(true);
-    setError(null);
-    try {
-      setUser(null);
-      await saveUser(null); // Remove do AsyncStorage
-    } catch (e: any) {
-      console.error('[AuthContext] Erro inesperado no signOut:', e);
-      setError('Erro inesperado ao sair.');
-    } finally {
-      setLoading(false);
-    }
+  async function signOut() {
+    setUser(null);
+    await saveUser(null);
   }
 
-  async function refreshProfile(): Promise<void> {
-    if (!user) return;
+  async function refreshProfile() {}
 
-    try {
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, email, full_name, role, is_board')
-        .eq('id', user.id)
-        .single();
-
-      if (profileError || !profile) return;
-
-      const updatedUser: AuthUser = {
-        id: profile.id,
-        email: profile.email,
-        fullName: profile.full_name,
-        role: (profile.role as HandluzRole) ?? 'usuario',
-        isBoard: !!profile.is_board,
-      };
-
-      setUser(updatedUser);
-      await saveUser(updatedUser); // Atualiza no AsyncStorage
-    } catch (e) {
-      console.error('[AuthContext] Erro ao atualizar perfil:', e);
-    }
-  }
-
-  const value: AuthContextValue = {
-    user,
-    loading,
-    error,
-    signIn,
-    signOut,
-    refreshProfile,
-  };
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{ user, loading, error, signIn, signOut, refreshProfile }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
-export function useAuth(): AuthContextValue {
+export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error('useAuth deve ser usado dentro de AuthProvider');
-  }
+  if (!ctx) throw new Error('useAuth deve ser usado dentro de AuthProvider');
   return ctx;
 }

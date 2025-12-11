@@ -1,14 +1,11 @@
-// app/navigation/DiretoriaStackNavigator.tsx
-
 import React from 'react';
-import { TouchableOpacity, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, type NavigationProp } from '@react-navigation/native';
 
 import DiretoriaScreen from '../screens/DiretoriaScreen';
 import { AppTheme } from '../../constants/theme';
-import { useAuth } from '../context/AuthContext';
+
+// Importa o componente global de perfil (Nome + Ícone)
+import { HeaderProfile } from '../../components/HeaderProfile';
 
 type DiretoriaStackParamList = {
   DiretoriaMain: undefined;
@@ -16,22 +13,6 @@ type DiretoriaStackParamList = {
 };
 
 const Stack = createNativeStackNavigator<DiretoriaStackParamList>();
-
-function HeaderProfileButton() {
-  const navigation = useNavigation<NavigationProp<Record<string, object | undefined>>>();
-  const { user } = useAuth();
-
-  function handlePress() {
-    // Sempre navega para a tab Perfil do BottomTabs
-    navigation.navigate('AppTabs' as any, { screen: 'Perfil' });
-  }
-
-  return (
-    <TouchableOpacity onPress={handlePress} style={styles.headerRight}>
-      <Ionicons name={user ? 'person' : 'person-circle-outline'} size={26} color="#FFFFFF" />
-    </TouchableOpacity>
-  );
-}
 
 export default function DiretoriaStackNavigator() {
   return (
@@ -41,14 +22,23 @@ export default function DiretoriaStackNavigator() {
         headerStyle: { backgroundColor: AppTheme.primary },
         headerTintColor: '#FFFFFF',
         headerTitleStyle: { fontWeight: '600' },
-        headerRight: () => <HeaderProfileButton />,
+        
+        // Remove a sombra para ficar igual ao padrão da Home
+        headerShadowVisible: false,
+        
+        // Remove texto "Voltar" no iOS
+        headerBackTitle: '',
+
+        // Botão padronizado
+        headerRight: () => <HeaderProfile />,
       }}
     >
-      <Stack.Screen name="DiretoriaMain" component={DiretoriaScreen} options={{ title: 'Diretoria' }} />
+      <Stack.Screen 
+        name="DiretoriaMain" 
+        component={DiretoriaScreen} 
+        // Alterado para 'Configurações' para condizer com o novo objetivo da aba
+        options={{ title: 'Configurações' }} 
+      />
     </Stack.Navigator>
   );
 }
-
-const styles = StyleSheet.create({
-  headerRight: { paddingRight: 12 },
-});
