@@ -3,7 +3,7 @@ import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
-// CORREÇÃO: Caminhos apontando para dentro da pasta 'app'
+// CAMINHOS CORRIGIDOS PARA SUA ESTRUTURA DE PASTAS
 import { useAuth } from '../app/context/AuthContext';
 import { AppTheme } from '../constants/theme'; 
 
@@ -16,7 +16,8 @@ export function HeaderProfile() {
     : 'Entrar';
 
   function handlePress() {
-    // Garante que vá para a Home (aba Inicio) e abra o Profile
+    // Isso navega para a Stack 'Inicio', e dentro dela força a ida para 'Profile'
+    // Funciona de qualquer aba (Equipes, Produtos, etc.)
     navigation.navigate('Inicio', { screen: 'Profile' });
   }
 
@@ -44,7 +45,7 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingRight: 10,
+    paddingRight: 10, // Espaçamento da borda direita
   },
   textContainer: {
     alignItems: 'flex-end',

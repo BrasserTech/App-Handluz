@@ -1,9 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../services/supabaseClient';
-import { registerForPushNotificationsAsync } from '../services/notificationService';
 
-// CORREÇÃO: Tipos explícitos para todas as roles do seu app
+// TIPO ATUALIZADO: Inclui todas as possibilidades para evitar erros de TypeScript
 export type HandluzRole = 'usuario' | 'diretoria' | 'admin' | 'atleta';
 
 export interface AuthUser {
@@ -14,12 +13,7 @@ export interface AuthUser {
   isBoard: boolean;
   isAthlete: boolean;
   isUser: boolean;
-  pushToken?: string | null;
 }
-
-// ... Resto do código do AuthContext (pode manter o que você já tinha ou copiar o anterior completo se preferir)
-// Vou omitir o corpo para focar na correção da tipagem acima, que era o erro principal.
-// Certifique-se de que o restante do arquivo usa AuthUser corretamente.
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -40,17 +34,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { loadSavedUser(); }, []);
 
-  async function updateUserPushToken(userId: string) {
-    try {
-      const token = await registerForPushNotificationsAsync();
-      if (token) {
-        await supabase.from('profiles').update({ expo_push_token: token }).eq('id', userId);
-        return token;
-      }
-    } catch (e) { console.error(e); }
-    return null;
-  }
-
   async function loadSavedUser() {
     try {
       const savedUserJson = await AsyncStorage.getItem(STORAGE_USER_KEY);
@@ -58,12 +41,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const savedUser: AuthUser = JSON.parse(savedUserJson);
         const { data: profile } = await supabase
           .from('profiles')
-          .select('*')
+          .select('id, email, full_name, role, is_board, is_athlete, is_user')
           .eq('id', savedUser.id)
           .single();
 
         if (profile) {
-          const token = await updateUserPushToken(profile.id);
           const authUser: AuthUser = {
             id: profile.id,
             email: profile.email,
@@ -72,7 +54,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             isBoard: !!profile.is_board,
             isAthlete: !!profile.is_athlete,
             isUser: !!profile.is_user,
-            pushToken: token ?? undefined,
           };
           setUser(authUser);
           await AsyncStorage.setItem(STORAGE_USER_KEY, JSON.stringify(authUser));
@@ -97,7 +78,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data: passRow } = await supabase.from('passwords').select('*').eq('profile_id', profile.id).single();
       if (!passRow || passRow.password !== password) return false;
 
-      const token = await updateUserPushToken(profile.id);
       const authUser: AuthUser = {
         id: profile.id,
         email: profile.email,
@@ -106,7 +86,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isBoard: !!profile.is_board,
         isAthlete: !!profile.is_athlete,
         isUser: !!profile.is_user,
-        pushToken: token ?? undefined,
       };
       setUser(authUser);
       await saveUser(authUser);
