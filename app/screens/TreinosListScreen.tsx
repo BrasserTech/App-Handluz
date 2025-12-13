@@ -24,6 +24,8 @@ import type { ViewStyle, TextStyle } from 'react-native';
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
 import { usePermissions } from '../../hooks/usePermissions';
+// Importação do serviço de notificação
+import { sendPushNotification } from '../services/notificationService';
 
 type Team = {
   id: string;
@@ -57,6 +59,8 @@ type FieldErrors = {
   date?: string;
 };
 
+// ================== HELPER FUNCTIONS ==================
+
 function toIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
@@ -65,7 +69,11 @@ function formatDateLabel(dateStr: string | null): string {
   if (!dateStr) return '';
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('pt-BR', {
+  // Ajuste para exibir a data correta sem problemas de fuso horário UTC na string simples
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const localDate = new Date(year, month - 1, day);
+  
+  return localDate.toLocaleDateString('pt-BR', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
@@ -97,9 +105,12 @@ function maskTime(text: string): string {
 }
 
 function isoToDayOfWeek(iso: string): number {
-  const d = new Date(iso);
-  return d.getDay(); // 0 domingo ... 6 sábado
+  const [y, m, d] = iso.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  return date.getDay(); // 0 domingo ... 6 sábado
 }
+
+// ================== COMPONENT ==================
 
 export default function TreinosListScreen() {
   const { isDiretoriaOrAdmin } = usePermissions();
@@ -285,7 +296,8 @@ export default function TreinosListScreen() {
         if (map[todayIso]) {
           setSelectedDate(todayIso);
         } else {
-          const firstKey = Object.keys(map)[0];
+          // se hoje não tem treino, seleciona o primeiro dia com treino do mês
+          const firstKey = Object.keys(map).sort()[0];
           if (firstKey) setSelectedDate(firstKey);
           else setSelectedDate(null);
         }
@@ -301,6 +313,56 @@ export default function TreinosListScreen() {
   useEffect(() => {
     loadTrainings();
   }, [loadTrainings]);
+
+  // ================== NOTIFICAÇÃO AOS ATLETAS ==================
+
+  async function notifyAthletes(training: Training) {
+    try {
+      // 1. Busca IDs dos usuários que são membros dessa equipe
+      const { data: members, error: membersError } = await supabase
+        .from('team_members') // Assumindo tabela de junção
+        .select('user_id')
+        .eq('team_id', training.team_id);
+
+      if (membersError) {
+        console.warn('[Treinos] Erro ao buscar membros para notificação:', membersError.message);
+        return;
+      }
+      if (!members || members.length === 0) return;
+
+      const userIds = members.map((m: any) => m.user_id);
+
+      // 2. Busca tokens desses usuários
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('expo_push_token')
+        .in('id', userIds)
+        .not('expo_push_token', 'is', null);
+
+      if (profilesError) {
+        console.warn('[Treinos] Erro ao buscar tokens:', profilesError.message);
+        return;
+      }
+
+      if (profiles && profiles.length > 0) {
+        const dateFormatted = formatDateLabel(training.training_date);
+        const title = "⚠️ Treino Cancelado";
+        const body = `O treino de ${dateFormatted} (${training.title}) foi cancelado.`;
+
+        // 3. Envia notificações em paralelo
+        await Promise.all(
+            profiles.map(p => {
+                if (p.expo_push_token) {
+                    return sendPushNotification(p.expo_push_token, title, body);
+                }
+            })
+        );
+        console.log(`[Treinos] Notificações enviadas para ${profiles.length} atletas.`);
+      }
+    } catch (error) {
+      console.error('[Treinos] Erro ao notificar atletas:', error);
+    }
+  }
 
   // ================== CALENDÁRIO ==================
 
@@ -464,7 +526,6 @@ export default function TreinosListScreen() {
 
         // ----------------- RECORRÊNCIA SEMANAL -----------------
         if (isWeekly) {
-          // busca a próxima férias da equipe a partir dessa data
           let repeatUntilIso: string | null = null;
 
           const { data: vacFuture, error: vacErr } = await supabase
@@ -483,12 +544,10 @@ export default function TreinosListScreen() {
           }
 
           if (vacFuture && vacFuture.length > 0) {
-            // repete até o dia anterior ao início das férias
             const firstStart = new Date(vacFuture[0].start_date as string);
             firstStart.setDate(firstStart.getDate() - 1);
             repeatUntilIso = toIsoDate(firstStart);
           } else {
-            // se não há férias futuras definidas, limita em +6 meses
             const limit = new Date(isoDate);
             limit.setMonth(limit.getMonth() + 6);
             repeatUntilIso = toIsoDate(limit);
@@ -496,7 +555,9 @@ export default function TreinosListScreen() {
 
           if (repeatUntilIso) {
             const start = new Date(isoDate);
-            const end = new Date(repeatUntilIso);
+            // Ajuste fuso para evitar problemas de dia
+            const [rY, rM, rD] = repeatUntilIso.split('-').map(Number);
+            const end = new Date(rY, rM - 1, rD);
             const weekday = isoToDayOfWeek(isoDate);
 
             const dateCursor = new Date(start);
@@ -505,7 +566,6 @@ export default function TreinosListScreen() {
             while (dateCursor <= end) {
               if (dateCursor.getDay() === weekday) {
                 const iso = toIsoDate(dateCursor);
-                // garante que não entre no período de férias (por segurança)
                 if (!isDateInVacation(iso)) {
                   inserts.push({
                     ...basePayload,
@@ -559,38 +619,34 @@ export default function TreinosListScreen() {
   async function handleCancelTraining(training: Training) {
     Alert.alert(
       'Cancelar treino',
-      'Tem certeza de que deseja cancelar este treino?',
+      'Esta ação cancelará esse treino e enviará uma mensagem aos atletas referentes. Deseja continuar?',
       [
         { text: 'Não', style: 'cancel' },
         {
-          text: 'Sim, cancelar',
+          text: 'Sim',
           style: 'destructive',
           onPress: async () => {
             try {
+              // 1. Atualiza Status no Banco
               const { error } = await supabase
                 .from('trainings')
                 .update({ status: 'canceled' })
                 .eq('id', training.id);
 
               if (error) {
-                console.error(
-                  '[Treinos] Erro ao cancelar treino:',
-                  error.message
-                );
+                console.error('[Treinos] Erro ao cancelar treino:', error.message);
                 Alert.alert('Erro', 'Não foi possível cancelar o treino.');
                 return;
               }
 
+              // 2. Envia Notificações (em background, não trava UI)
+              notifyAthletes(training);
+
+              // 3. Recarrega a tela
               await loadTrainings();
             } catch (err) {
-              console.error(
-                '[Treinos] Erro inesperado ao cancelar treino:',
-                err
-              );
-              Alert.alert(
-                'Erro',
-                'Ocorreu um erro inesperado ao cancelar o treino.'
-              );
+              console.error('[Treinos] Erro inesperado ao cancelar treino:', err);
+              Alert.alert('Erro', 'Ocorreu um erro inesperado ao cancelar o treino.');
             }
           },
         },

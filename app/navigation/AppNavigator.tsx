@@ -1,26 +1,18 @@
 import React, { useEffect } from 'react';
 import { View, TouchableOpacity, StyleSheet, Dimensions, Text } from 'react-native';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// Stacks
 import HomeStackNavigator from './HomeStackNavigator';
 import EquipesStackNavigator from './EquipesStackNavigator';
 import TreinosStackNavigator from './TreinosStackNavigator';
 import ProdutosStackNavigator from './ProdutosStackNavigator';
 import DiretoriaStackNavigator from './DiretoriaStackNavigator';
-// Nota: O ProfileOrLoginScreen parece estar na mesma pasta navigation ou em screens?
-// Se estiver em app/screens, ajuste para '../screens/ProfileOrLoginScreen'
-// Se estiver em app/navigation, mantenha './ProfileOrLoginScreen'
-import ProfileOrLoginScreen from './ProfileOrLoginScreen'; 
-
 import { AppTheme } from '../../constants/theme';
-import { useAuth } from '../context/AuthContext';
 
-export type BottomTabParamList = {
+export type RootTabParamList = {
   Inicio: undefined;
   Equipes: undefined;
   Treinos: undefined;
@@ -28,32 +20,19 @@ export type BottomTabParamList = {
   Configuracoes: undefined;
 };
 
-export type RootStackParamList = {
-  AppTabs: undefined;
-  Profile: undefined;
-};
-
-const Tab = createBottomTabNavigator<BottomTabParamList>();
-const Stack = createNativeStackNavigator<RootStackParamList>();
+const Tab = createBottomTabNavigator<RootTabParamList>();
 const { width } = Dimensions.get('window');
 
-// --- COMPONENTE DE MENU INFERIOR CUSTOMIZADO ---
 function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const totalTabs = state.routes.length;
-  const tabWidth = width / totalTabs;
+  const tabWidth = width / state.routes.length;
   const translateX = useSharedValue(0);
 
   useEffect(() => {
-    translateX.value = withTiming(state.index * tabWidth, {
-      duration: 250,
-      easing: Easing.out(Easing.quad),
-    });
+    translateX.value = withTiming(state.index * tabWidth, { duration: 250, easing: Easing.out(Easing.quad) });
   }, [state.index, tabWidth]);
 
-  const animatedIndicatorStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: translateX.value }],
-  }));
+  const animatedIndicatorStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
 
   return (
     <View style={styles.tabBarContainer}>
@@ -61,12 +40,10 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         <Animated.View style={[styles.activeIndicatorContainer, { width: tabWidth }, animatedIndicatorStyle]}>
           <View style={styles.activeCircle} />
         </Animated.View>
-
         <View style={styles.tabsRow}>
           {state.routes.map((route, index) => {
             const { options } = descriptors[route.key];
             const isFocused = state.index === index;
-
             const onPress = () => {
               const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
               if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
@@ -101,42 +78,18 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   );
 }
 
-// --- GRUPO DE ABAS ---
-function BottomTabsGroup() {
+export default function AppNavigator() {
   return (
-    <Tab.Navigator tabBar={(props) => <CustomTabBar {...props} />} screenOptions={{ headerShown: false }}>
+    <Tab.Navigator
+      tabBar={(props) => <CustomTabBar {...props} />}
+      screenOptions={{ headerShown: false }}
+    >
       <Tab.Screen name="Inicio" component={HomeStackNavigator} options={{ tabBarLabel: 'Início' }} />
       <Tab.Screen name="Equipes" component={EquipesStackNavigator} options={{ tabBarLabel: 'Equipes' }} />
       <Tab.Screen name="Treinos" component={TreinosStackNavigator} options={{ tabBarLabel: 'Treinos' }} />
       <Tab.Screen name="Produtos" component={ProdutosStackNavigator} options={{ tabBarLabel: 'Produtos' }} />
       <Tab.Screen name="Configuracoes" component={DiretoriaStackNavigator} options={{ tabBarLabel: 'Ajustes' }} />
     </Tab.Navigator>
-  );
-}
-
-// --- APP NAVIGATOR PRINCIPAL (ROOT) ---
-export default function AppNavigator() {
-  const { user } = useAuth();
-
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="AppTabs" component={BottomTabsGroup} />
-      
-      <Stack.Screen 
-        name="Profile" 
-        component={ProfileOrLoginScreen} 
-        options={{
-          headerShown: true,
-          title: user ? 'Meu Perfil' : 'Acesse sua conta',
-          headerStyle: { backgroundColor: AppTheme.background },
-          headerTintColor: AppTheme.primary,
-          headerTitleStyle: { color: AppTheme.textPrimary },
-          
-          // CORREÇÃO: Propriedade corrigida para remover texto 'Voltar'
-          headerBackTitle: '', 
-        }}
-      />
-    </Stack.Navigator>
   );
 }
 
