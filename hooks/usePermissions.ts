@@ -13,8 +13,15 @@ export function usePermissions() {
     [user?.role]
   );
 
+  // Permissão para ver documentos criptografados (Técnico/Diretoria/Admin)
+  const canViewEncryptedDocuments = useMemo(
+    () => user?.role === 'diretoria' || user?.role === 'admin',
+    [user?.role]
+  );
+
   return {
     user,
     isDiretoriaOrAdmin,
+    canViewEncryptedDocuments,
   };
 }

@@ -26,6 +26,8 @@ import { AppTheme } from '../../constants/theme';
 import type { EquipesStackParamList } from '../navigation/EquipesStackNavigator';
 import { supabase } from '../services/supabaseClient';
 import { usePermissions } from '../../hooks/usePermissions';
+import { encryptImageBlob } from '../services/imageEncryption';
+import EncryptedImage from '../../components/EncryptedImage';
 
 type Props = NativeStackScreenProps<EquipesStackParamList, 'EquipeAtletas'>;
 
@@ -165,6 +167,55 @@ export default function EquipeAtletasScreen({ route }: Props) {
       return publicData.publicUrl ?? null;
     } catch (err) {
       console.error('[EquipeAtletasScreen] Erro inesperado upload:', err);
+      return null;
+    }
+  }
+
+  // Função específica para upload de documentos criptografados
+  async function uploadEncryptedDocument(
+    picked: PickedImage,
+    pathPrefix: string
+  ): Promise<string | null> {
+    try {
+      const response = await fetch(picked.uri);
+      const originalBlob = await response.blob();
+
+      // Obter o tipo MIME original do blob ANTES de criptografar
+      const originalContentType = originalBlob.type || 'image/jpeg';
+
+      // Criptografar o documento antes do upload
+      const encryptedBlob = await encryptImageBlob(originalBlob);
+
+      const extGuess = picked.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const fileExt = ['jpg', 'jpeg', 'png', 'webp'].includes(extGuess)
+        ? extGuess
+        : 'jpg';
+
+      // Adicionar .enc para indicar que está criptografado
+      const filePath = `${pathPrefix}-${Date.now()}.${fileExt}.enc`;
+
+      // Criar um novo Blob com o tipo MIME correto
+      const blobWithCorrectType = new Blob([encryptedBlob], { type: originalContentType });
+
+      const { data, error } = await supabase.storage
+        .from('athletes')
+        .upload(filePath, blobWithCorrectType, {
+          upsert: true,
+          contentType: originalContentType, // Usar tipo MIME original
+        });
+
+      if (error) {
+        console.error('[EquipeAtletasScreen] Erro upload documento criptografado:', error.message);
+        return null;
+      }
+
+      const { data: publicData } = supabase.storage
+        .from('athletes')
+        .getPublicUrl(data.path);
+
+      return publicData.publicUrl ?? null;
+    } catch (err) {
+      console.error('[EquipeAtletasScreen] Erro inesperado upload documento:', err);
       return null;
     }
   }
@@ -510,16 +561,16 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
         const [imageUrl, docFrontUrl, docBackUrl] = await Promise.all([
           imagemAtleta
-            ? uploadImageToStorage(imagemAtleta, `athletes/${athleteId}-photo`)
+            ? uploadImageToStorage(imagemAtleta, `${athleteId}-photo`)
             : Promise.resolve(null),
           docFrente
-            ? uploadImageToStorage(
+            ? uploadEncryptedDocument(
                 docFrente,
-                `athletes/${athleteId}-doc-front`
+                `${athleteId}-doc-front`
               )
             : Promise.resolve(null),
           docVerso
-            ? uploadImageToStorage(docVerso, `athletes/${athleteId}-doc-back`)
+            ? uploadEncryptedDocument(docVerso, `${athleteId}-doc-back`)
             : Promise.resolve(null),
         ]);
 
@@ -549,16 +600,16 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
         const [imageUrl, docFrontUrl, docBackUrl] = await Promise.all([
           imagemAtleta
-            ? uploadImageToStorage(imagemAtleta, `athletes/${athleteId}-photo`)
+            ? uploadImageToStorage(imagemAtleta, `${athleteId}-photo`)
             : Promise.resolve(null),
           docFrente
-            ? uploadImageToStorage(
+            ? uploadEncryptedDocument(
                 docFrente,
-                `athletes/${athleteId}-doc-front`
+                `${athleteId}-doc-front`
               )
             : Promise.resolve(null),
           docVerso
-            ? uploadImageToStorage(docVerso, `athletes/${athleteId}-doc-back`)
+            ? uploadEncryptedDocument(docVerso, `${athleteId}-doc-back`)
             : Promise.resolve(null),
         ]);
 
@@ -697,7 +748,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
         {/* Rodapé: documentos + ações da diretoria */}
         <View style={styles.cardBottomRow}>
           <View style={styles.cardLinksRow}>
-            {temDocumento && (
+            {temDocumento && isDiretoriaOrAdmin && (
               <View style={styles.docTag}>
                 <Ionicons
                   name="document-text-outline"
@@ -957,28 +1008,40 @@ export default function EquipeAtletasScreen({ route }: Props) {
             </Text>
             <View style={styles.imageRow}>
               <TouchableOpacity
-                style={[styles.imageButton, styles.imageButtonDisabled]}
-                onPress={() => {}}
-                disabled={true}
+                style={styles.imageButton}
+                onPress={() => pickImage(setDocFrente)}
               >
                 <Ionicons
                   name="document-text-outline"
                   size={18}
-                  color={AppTheme.textMuted}
+                  color={AppTheme.primary}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={[styles.imageButtonText, styles.imageButtonTextDisabled]}>
-                  Em desenvolvimento
+                <Text style={styles.imageButtonText}>
+                  {docFrente ? 'Trocar documento' : 'Escolher documento'}
                 </Text>
               </TouchableOpacity>
 
               {docFrente && (
-                <Image
-                  source={{ uri: docFrente.uri }}
-                  style={styles.imagePreview}
-                />
+                <TouchableOpacity
+                  onPress={() => setDocFrente(null)}
+                  style={{ marginLeft: 8 }}
+                >
+                  <Ionicons
+                    name="close-circle-outline"
+                    size={24}
+                    color="#D32F2F"
+                  />
+                </TouchableOpacity>
               )}
             </View>
+
+            {docFrente && (
+              <Image
+                source={{ uri: docFrente.uri }}
+                style={styles.imagePreview}
+              />
+            )}
 
             {/* Documento verso */}
             <Text style={styles.fieldLabel}>
@@ -986,28 +1049,40 @@ export default function EquipeAtletasScreen({ route }: Props) {
             </Text>
             <View style={styles.imageRow}>
               <TouchableOpacity
-                style={[styles.imageButton, styles.imageButtonDisabled]}
-                onPress={() => {}}
-                disabled={true}
+                style={styles.imageButton}
+                onPress={() => pickImage(setDocVerso)}
               >
                 <Ionicons
                   name="document-text-outline"
                   size={18}
-                  color={AppTheme.textMuted}
+                  color={AppTheme.primary}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={[styles.imageButtonText, styles.imageButtonTextDisabled]}>
-                  Em desenvolvimento
+                <Text style={styles.imageButtonText}>
+                  {docVerso ? 'Trocar documento' : 'Escolher documento'}
                 </Text>
               </TouchableOpacity>
 
               {docVerso && (
-                <Image
-                  source={{ uri: docVerso.uri }}
-                  style={styles.imagePreview}
-                />
+                <TouchableOpacity
+                  onPress={() => setDocVerso(null)}
+                  style={{ marginLeft: 8 }}
+                >
+                  <Ionicons
+                    name="close-circle-outline"
+                    size={24}
+                    color="#D32F2F"
+                  />
+                </TouchableOpacity>
               )}
             </View>
+
+            {docVerso && (
+              <Image
+                source={{ uri: docVerso.uri }}
+                style={styles.imagePreview}
+              />
+            )}
 
             {/* Botões */}
             <View style={styles.modalButtonsRow}>
@@ -1092,17 +1167,17 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
                 <View style={styles.docsImagesRow}>
                   {docPreview?.front && (
-                    <Image
-                      source={{ uri: docPreview.front }}
+                    <EncryptedImage
+                      encryptedUrl={docPreview.front}
                       style={styles.docsImage}
-                      resizeMode="contain"
+                      placeholderIcon="document-text-outline"
                     />
                   )}
                   {docPreview?.back && (
-                    <Image
-                      source={{ uri: docPreview.back }}
+                    <EncryptedImage
+                      encryptedUrl={docPreview.back}
                       style={styles.docsImage}
-                      resizeMode="contain"
+                      placeholderIcon="document-text-outline"
                     />
                   )}
                   {!docPreview?.front && !docPreview?.back && (
