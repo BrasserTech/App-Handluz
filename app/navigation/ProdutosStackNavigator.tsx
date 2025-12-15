@@ -28,9 +28,6 @@ export default function ProdutosStackNavigator() {
         
         // Remove texto "Voltar" no iOS
         headerBackTitle: '',
-
-        // Botão padronizado
-        headerRight: () => <HeaderProfile />,
       }}
     >
       <Stack.Screen 

@@ -3,6 +3,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
 } from 'react';
@@ -19,11 +20,13 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import type { ViewStyle, TextStyle } from 'react-native';
 
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
 import { usePermissions } from '../../hooks/usePermissions';
+import { HeaderProfile } from '../../components/HeaderProfile';
 
 type Team = {
   id: string;
@@ -103,6 +106,7 @@ function isoToDayOfWeek(iso: string): number {
 
 export default function TreinosListScreen() {
   const { isDiretoriaOrAdmin } = usePermissions();
+  const navigation = useNavigation();
 
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamsLoading, setTeamsLoading] = useState(false);
@@ -371,6 +375,25 @@ export default function TreinosListScreen() {
 
     setModalVisible(true);
   }
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 10 }}>
+          {isDiretoriaOrAdmin && selectedTeamId && (
+            <TouchableOpacity
+              onPress={() => openNewTrainingModal(null)}
+              style={{ marginRight: 12, padding: 4 }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="add" size={26} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
+          <HeaderProfile />
+        </View>
+      ),
+    });
+  }, [navigation, isDiretoriaOrAdmin, selectedTeamId]);
 
   function openEditTrainingModal(training: Training) {
     setEditingTraining(training);

@@ -28,9 +28,6 @@ export default function TreinosStackNavigator() {
         
         // Remove texto "Voltar" no iOS para um visual mais limpo
         headerBackTitle: '',
-
-        // Botão padronizado: Nome (se logado) + Ícone
-        headerRight: () => <HeaderProfile />,
       }}
     >
       <Stack.Screen 

@@ -1,6 +1,6 @@
 // app/screens/ProdutosListScreen.tsx
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -16,10 +16,12 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
 import { usePermissions } from '../../hooks/usePermissions';
+import { HeaderProfile } from '../../components/HeaderProfile';
 
 const STORAGE_BUCKET = 'store-items'; // crie esse bucket no Supabase ou ajuste o nome
 
@@ -69,6 +71,7 @@ function isoToDisplay(iso: string | null): string {
 
 export default function ProdutosListScreen() {
   const { isDiretoriaOrAdmin } = usePermissions();
+  const navigation = useNavigation();
 
   const [activeTab, setActiveTab] = useState<StoreItemType>('product');
   const [items, setItems] = useState<StoreItem[]>([]);
@@ -208,6 +211,25 @@ export default function ProdutosListScreen() {
     setFieldErrors({});
     setModalVisible(true);
   }
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 10 }}>
+          {isDiretoriaOrAdmin && (
+            <TouchableOpacity
+              onPress={openNewItemModal}
+              style={{ marginRight: 12, padding: 4 }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="add" size={26} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
+          <HeaderProfile />
+        </View>
+      ),
+    });
+  }, [navigation, isDiretoriaOrAdmin]);
 
   function openEditItemModal(item: StoreItem) {
     setEditingItem(item);

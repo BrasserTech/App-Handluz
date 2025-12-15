@@ -2,7 +2,7 @@
 // Listagem de equipes (tabela public.teams) e, na aba Diretoria,
 // listagem de membros da diretoria (profiles com role = 'diretoria' ou 'admin').
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
 import { usePermissions } from '../../hooks/usePermissions';
 import type { EquipesStackParamList } from '../navigation/EquipesStackNavigator';
+import { HeaderProfile } from '../../components/HeaderProfile';
 
 // logo (arquivo em /assets/images/logo_handluz.png)
 const handluzLogo = require('../../assets/images/logo_handluz.png');
@@ -162,6 +163,25 @@ export default function EquipesListScreen() {
     setFormCategoria('');
     setModalVisible(true);
   }
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 10 }}>
+          {viewMode === 'times' && isDiretoriaOrAdmin && (
+            <TouchableOpacity
+              onPress={openCreateModal}
+              style={{ marginRight: 12, padding: 4 }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="add" size={26} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
+          <HeaderProfile />
+        </View>
+      ),
+    });
+  }, [navigation, isDiretoriaOrAdmin, viewMode]);
 
   function openEditModal(equipe: Equipe) {
     setEditingEquipe(equipe);
