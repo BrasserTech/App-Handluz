@@ -7,6 +7,9 @@ import EquipesListScreen from '../screens/EquipesListScreen';
 import EquipeAtletasScreen from '../screens/EquipeAtletasScreen';
 import { AppTheme } from '../../constants/theme';
 
+// Importa o componente global que criamos
+import { HeaderProfile } from '../../components/HeaderProfile';
+
 export type EquipesStackParamList = {
   EquipesList: undefined;
   EquipeAtletas: {
@@ -44,15 +47,15 @@ export default function EquipesStackNavigator() {
         
         // Remove o texto "Voltar" (iOS) ou ajusta o padrão
         headerBackTitle: '',
+        
+        // Adiciona o botão de perfil global (Nome + Ícone)
+        headerRight: () => <HeaderProfile />,
       }}
     >
       <Stack.Screen
         name="EquipesList"
         component={EquipesListScreen}
-        options={{ 
-          title: 'Equipes',
-          headerRight: undefined, // Configurado pela tela via useLayoutEffect
-        }}
+        options={{ title: 'Equipes' }}
       />
       
       <Stack.Screen
@@ -60,7 +63,6 @@ export default function EquipesStackNavigator() {
         component={EquipeAtletasScreen}
         options={({ route }) => ({
           title: route.params?.equipeNome ?? 'Equipe',
-          headerRight: undefined, // Configurado pela tela via useLayoutEffect
         })}
       />
     </Stack.Navigator>

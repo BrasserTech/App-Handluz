@@ -3,7 +3,6 @@
 import React, {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useState,
 } from 'react';
@@ -20,13 +19,12 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ViewStyle, TextStyle } from 'react-native';
 
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
 import { usePermissions } from '../../hooks/usePermissions';
-import { HeaderProfile } from '../../components/HeaderProfile';
 
 type Team = {
   id: string;
@@ -106,7 +104,7 @@ function isoToDayOfWeek(iso: string): number {
 
 export default function TreinosListScreen() {
   const { isDiretoriaOrAdmin } = usePermissions();
-  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
 
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamsLoading, setTeamsLoading] = useState(false);
@@ -375,25 +373,6 @@ export default function TreinosListScreen() {
 
     setModalVisible(true);
   }
-
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 10 }}>
-          {isDiretoriaOrAdmin && selectedTeamId && (
-            <TouchableOpacity
-              onPress={() => openNewTrainingModal(null)}
-              style={{ marginRight: 12, padding: 4 }}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="add" size={26} color="#FFFFFF" />
-            </TouchableOpacity>
-          )}
-          <HeaderProfile />
-        </View>
-      ),
-    });
-  }, [navigation, isDiretoriaOrAdmin, selectedTeamId]);
 
   function openEditTrainingModal(training: Training) {
     setEditingTraining(training);
@@ -1059,7 +1038,7 @@ export default function TreinosListScreen() {
       {/* FAB – apenas diretoria/admin */}
       {isDiretoriaOrAdmin && selectedTeamId && (
         <TouchableOpacity
-          style={styles.fab}
+          style={[styles.fab, { bottom: 88 + insets.bottom }]}
           onPress={() => openNewTrainingModal(selectedDate)}
           activeOpacity={0.9}
         >
@@ -1285,6 +1264,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: AppTheme.background,
+    position: 'relative',
+    overflow: 'visible',
   },
   scroll: {
     flex: 1,
@@ -1527,7 +1508,6 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 18,
-    bottom: 18,
     width: 52,
     height: 52,
     borderRadius: 26,
@@ -1538,7 +1518,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    elevation: 8,
+    zIndex: 1000,
   },
   modalOverlay: {
     flex: 1,

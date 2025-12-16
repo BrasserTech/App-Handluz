@@ -3,7 +3,7 @@
 // Diretoria/Admin: pode criar, editar e excluir atletas, enviar foto e documentos.
 // Usuário comum: apenas visualiza.
 
-import React, { useCallback, useEffect, useState, useLayoutEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { AppTheme } from '../../constants/theme';
@@ -29,7 +29,6 @@ import { supabase } from '../services/supabaseClient';
 import { usePermissions } from '../../hooks/usePermissions';
 import { encryptImageBlob } from '../services/imageEncryption';
 import EncryptedImage from '../../components/EncryptedImage';
-import { HeaderProfile } from '../../components/HeaderProfile';
 
 type Props = NativeStackScreenProps<EquipesStackParamList, 'EquipeAtletas'>;
 
@@ -57,7 +56,7 @@ type FieldErrors = {
 export default function EquipeAtletasScreen({ route }: Props) {
   const { equipeId, equipeNome } = route.params;
   const { isDiretoriaOrAdmin } = usePermissions();
-  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
 
   const [atletas, setAtletas] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(false);
@@ -464,25 +463,6 @@ export default function EquipeAtletasScreen({ route }: Props) {
     setModalVisible(true);
   }
 
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 10 }}>
-          {isDiretoriaOrAdmin && (
-            <TouchableOpacity
-              onPress={abrirModalNovoAtleta}
-              style={{ marginRight: 12, padding: 4 }}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="add" size={26} color="#FFFFFF" />
-            </TouchableOpacity>
-          )}
-          <HeaderProfile />
-        </View>
-      ),
-    });
-  }, [navigation, isDiretoriaOrAdmin]);
-
   function abrirModalEditarAtleta(atleta: Athlete) {
     setEditingAthlete(atleta);
     setFormNomeCompleto(atleta.full_name);
@@ -868,7 +848,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
       {isDiretoriaOrAdmin && (
         <TouchableOpacity
-          style={styles.fab}
+          style={[styles.fab, { bottom: 88 + insets.bottom }]}
           onPress={abrirModalNovoAtleta}
           activeOpacity={0.9}
         >
@@ -1224,6 +1204,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: AppTheme.background,
+    position: 'relative',
+    overflow: 'visible',
   },
   pageHeader: {
     paddingHorizontal: 16,
@@ -1371,7 +1353,6 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 18,
-    bottom: 18,
     width: 52,
     height: 52,
     borderRadius: 26,
@@ -1382,7 +1363,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    elevation: 8,
+    zIndex: 1000,
   },
 
   // Modal

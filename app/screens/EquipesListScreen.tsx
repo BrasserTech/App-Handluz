@@ -2,7 +2,7 @@
 // Listagem de equipes (tabela public.teams) e, na aba Diretoria,
 // listagem de membros da diretoria (profiles com role = 'diretoria' ou 'admin').
 
-import React, { useCallback, useEffect, useState, useLayoutEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -18,13 +18,13 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
 import { usePermissions } from '../../hooks/usePermissions';
 import type { EquipesStackParamList } from '../navigation/EquipesStackNavigator';
-import { HeaderProfile } from '../../components/HeaderProfile';
 
 // logo (arquivo em /assets/images/logo_handluz.png)
 const handluzLogo = require('../../assets/images/logo_handluz.png');
@@ -52,6 +52,7 @@ type ViewMode = 'times' | 'diretoria';
 export default function EquipesListScreen() {
   const { isDiretoriaOrAdmin } = usePermissions();
   const navigation = useNavigation<EquipesNav>();
+  const insets = useSafeAreaInsets();
 
   // Times
   const [equipes, setEquipes] = useState<Equipe[]>([]);
@@ -163,25 +164,6 @@ export default function EquipesListScreen() {
     setFormCategoria('');
     setModalVisible(true);
   }
-
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 10 }}>
-          {viewMode === 'times' && isDiretoriaOrAdmin && (
-            <TouchableOpacity
-              onPress={openCreateModal}
-              style={{ marginRight: 12, padding: 4 }}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="add" size={26} color="#FFFFFF" />
-            </TouchableOpacity>
-          )}
-          <HeaderProfile />
-        </View>
-      ),
-    });
-  }, [navigation, isDiretoriaOrAdmin, viewMode]);
 
   function openEditModal(equipe: Equipe) {
     setEditingEquipe(equipe);
@@ -561,7 +543,7 @@ export default function EquipesListScreen() {
       {/* FAB apenas na aba Times e para diretoria/admin */}
       {viewMode === 'times' && isDiretoriaOrAdmin && (
         <TouchableOpacity
-          style={styles.fab}
+          style={[styles.fab, { bottom: 88 + insets.bottom }]}
           onPress={openCreateModal}
           activeOpacity={0.9}
         >
@@ -702,6 +684,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: AppTheme.background,
+    position: 'relative',
+    overflow: 'visible',
   },
   pageHeader: {
     paddingHorizontal: 16,
@@ -851,7 +835,6 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 18,
-    bottom: 18,
     width: 52,
     height: 52,
     borderRadius: 26,
@@ -862,7 +845,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    elevation: 8,
+    zIndex: 1000,
   },
 
   // Modal (equipes e funções)
