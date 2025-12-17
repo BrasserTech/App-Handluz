@@ -15,6 +15,7 @@ import {
   TextInput,
   Modal,
   Image,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -31,10 +32,18 @@ const handluzLogo = require('../../assets/images/logo_handluz.png');
 
 type EquipesNav = NativeStackNavigationProp<EquipesStackParamList>;
 
+type Category = {
+  id: number;
+  name: string;
+  age_min: number | null;
+  age_max: number | null;
+};
+
 type Equipe = {
   id: string;
   name: string;
-  category: string | null;
+  category_id: number | null;
+  category?: Category | null;
 };
 
 type RoleValue = 'usuario' | 'diretoria' | 'admin';
@@ -64,11 +73,16 @@ export default function EquipesListScreen() {
   const [boardLoading, setBoardLoading] = useState<boolean>(false);
   const [boardRefreshing, setBoardRefreshing] = useState<boolean>(false);
 
+  // Categorias
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState<boolean>(false);
+  const [categoryPickerVisible, setCategoryPickerVisible] = useState<boolean>(false);
+
   // Modal criação/edição de equipe
   const [modalVisible, setModalVisible] = useState<boolean>(false);
   const [editingEquipe, setEditingEquipe] = useState<Equipe | null>(null);
   const [formNome, setFormNome] = useState<string>('');
-  const [formCategoria, setFormCategoria] = useState<string>('');
+  const [formCategoriaId, setFormCategoriaId] = useState<number | null>(null);
   const [saving, setSaving] = useState<boolean>(false);
 
   // Modal edição de função na diretoria
@@ -80,6 +94,33 @@ export default function EquipesListScreen() {
   // aba selecionada (Times / Diretoria)
   const [viewMode, setViewMode] = useState<ViewMode>('times');
 
+  // ===================== CARREGAR CATEGORIAS =====================
+
+  const loadCategories = useCallback(async () => {
+    setCategoriesLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('categories')
+        .select('id, name, age_min, age_max')
+        .order('name', { ascending: true });
+
+      if (error) {
+        console.error('[EquipesListScreen] Erro ao carregar categorias:', error.message);
+        return;
+      }
+
+      setCategories((data ?? []) as Category[]);
+    } catch (err) {
+      console.error('[EquipesListScreen] Erro inesperado ao carregar categorias:', err);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCategories();
+  }, [loadCategories]);
+
   // ===================== CARREGAR EQUIPES =====================
 
   const loadEquipes = useCallback(async () => {
@@ -87,7 +128,12 @@ export default function EquipesListScreen() {
     try {
       const { data, error } = await supabase
         .from('teams')
-        .select('id, name, category')
+        .select(`
+          id, 
+          name, 
+          category_id,
+          category:categories(id, name, age_min, age_max)
+        `)
         .order('name', { ascending: true });
 
       if (error) {
@@ -161,14 +207,14 @@ export default function EquipesListScreen() {
   function openCreateModal() {
     setEditingEquipe(null);
     setFormNome('');
-    setFormCategoria('');
+    setFormCategoriaId(null);
     setModalVisible(true);
   }
 
   function openEditModal(equipe: Equipe) {
     setEditingEquipe(equipe);
     setFormNome(equipe.name);
-    setFormCategoria(equipe.category ?? '');
+    setFormCategoriaId(equipe.category_id ?? null);
     setModalVisible(true);
   }
 
@@ -187,7 +233,7 @@ export default function EquipesListScreen() {
           .from('teams')
           .update({
             name: formNome.trim(),
-            category: formCategoria.trim() || null,
+            category_id: formCategoriaId || null,
           })
           .eq('id', editingEquipe.id);
 
@@ -200,7 +246,7 @@ export default function EquipesListScreen() {
         // Criação
         const { error } = await supabase.from('teams').insert({
           name: formNome.trim(),
-          category: formCategoria.trim() || null,
+          category_id: formCategoriaId || null,
         });
 
         if (error) {
@@ -213,7 +259,7 @@ export default function EquipesListScreen() {
       setModalVisible(false);
       setEditingEquipe(null);
       setFormNome('');
-      setFormCategoria('');
+      setFormCategoriaId(null);
 
       await loadEquipes();
     } catch (err) {
@@ -324,14 +370,30 @@ export default function EquipesListScreen() {
   // ===================== RENDER TIMES =====================
 
   function renderEquipe({ item }: { item: Equipe }) {
+    const category = item.category;
+    const categoryName = category?.name || null;
+    const minAge = category?.age_min;
+    const maxAge = category?.age_max;
+
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle}>{item.name}</Text>
-          {item.category ? (
-            <Text style={styles.cardBadge}>{item.category}</Text>
+          {categoryName ? (
+            <Text style={styles.cardBadge}>{categoryName}</Text>
           ) : null}
         </View>
+
+        {category && (
+          <View style={styles.categoryDetails}>
+            {(minAge !== null || maxAge !== null) && (
+              <Text style={styles.categoryAge}>
+                Idade: {minAge !== null ? `${minAge}` : '—'} a{' '}
+                {maxAge !== null ? `${maxAge} anos` : '—'}
+              </Text>
+            )}
+          </View>
+        )}
 
         <View style={styles.cardFooter}>
           <TouchableOpacity
@@ -578,12 +640,28 @@ export default function EquipesListScreen() {
             />
 
             <Text style={styles.fieldLabel}>Categoria (opcional)</Text>
-            <TextInput
+            <TouchableOpacity
               style={styles.input}
-              value={formCategoria}
-              onChangeText={setFormCategoria}
-              placeholder="Ex.: Sub-18, Adulto"
-            />
+              onPress={() => setCategoryPickerVisible(true)}
+            >
+              <Text
+                style={[
+                  styles.pickerText,
+                  !formCategoriaId && styles.pickerPlaceholder,
+                ]}
+              >
+                {formCategoriaId
+                  ? categories.find(c => c.id === formCategoriaId)?.name ||
+                    'Selecione uma categoria'
+                  : 'Selecione uma categoria'}
+              </Text>
+              <Ionicons
+                name="chevron-down-outline"
+                size={20}
+                color={AppTheme.textSecondary}
+                style={{ position: 'absolute', right: 10 }}
+              />
+            </TouchableOpacity>
 
             <View style={styles.modalButtonsRow}>
               <TouchableOpacity
@@ -671,6 +749,98 @@ export default function EquipesListScreen() {
                 )}
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal seletor de categoria */}
+      <Modal
+        visible={categoryPickerVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCategoryPickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.pickerModalCard}>
+            <View style={styles.pickerModalHeader}>
+              <Text style={styles.pickerModalTitle}>Selecione a categoria</Text>
+              <TouchableOpacity
+                onPress={() => setCategoryPickerVisible(false)}
+                style={styles.pickerCloseButton}
+              >
+                <Ionicons name="close" size={24} color={AppTheme.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.pickerList}>
+              <TouchableOpacity
+                style={[
+                  styles.pickerItem,
+                  !formCategoriaId && styles.pickerItemSelected,
+                ]}
+                onPress={() => {
+                  setFormCategoriaId(null);
+                  setCategoryPickerVisible(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.pickerItemText,
+                    !formCategoriaId && styles.pickerItemTextSelected,
+                  ]}
+                >
+                  Nenhuma categoria
+                </Text>
+              </TouchableOpacity>
+
+              {categories.map(category => (
+                <TouchableOpacity
+                  key={category.id}
+                  style={[
+                    styles.pickerItem,
+                    formCategoriaId === category.id && styles.pickerItemSelected,
+                  ]}
+                  onPress={() => {
+                    setFormCategoriaId(category.id);
+                    setCategoryPickerVisible(false);
+                  }}
+                >
+                  <View style={styles.pickerItemContent}>
+                    <Text
+                      style={[
+                        styles.pickerItemText,
+                        formCategoriaId === category.id &&
+                          styles.pickerItemTextSelected,
+                      ]}
+                    >
+                      {category.name}
+                    </Text>
+                    {(category.age_min !== null ||
+                      category.age_max !== null) && (
+                      <View style={styles.pickerItemDetails}>
+                        <Text style={styles.pickerItemDetail}>
+                          Idade: {category.age_min !== null ? `${category.age_min}` : '—'} a{' '}
+                          {category.age_max !== null ? `${category.age_max} anos` : '—'}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  {formCategoriaId === category.id && (
+                    <Ionicons
+                      name="checkmark"
+                      size={20}
+                      color={AppTheme.primary}
+                    />
+                  )}
+                </TouchableOpacity>
+              ))}
+
+              {categories.length === 0 && (
+                <Text style={styles.pickerEmptyText}>
+                  Nenhuma categoria cadastrada
+                </Text>
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -926,5 +1096,94 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: AppTheme.textMuted,
     marginBottom: 6,
+  },
+
+  // Categoria details
+  categoryDetails: {
+    marginTop: 8,
+    marginBottom: 4,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: AppTheme.border,
+  },
+  categoryAge: {
+    fontSize: 12,
+    color: AppTheme.textSecondary,
+    marginBottom: 4,
+  },
+
+  // Picker
+  pickerText: {
+    fontSize: 14,
+    color: AppTheme.textPrimary,
+  },
+  pickerPlaceholder: {
+    color: AppTheme.textMuted,
+  },
+  pickerModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: '80%',
+    backgroundColor: AppTheme.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+    overflow: 'hidden',
+  },
+  pickerModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: AppTheme.border,
+  },
+  pickerModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: AppTheme.textPrimary,
+  },
+  pickerCloseButton: {
+    padding: 4,
+  },
+  pickerList: {
+    maxHeight: 400,
+  },
+  pickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: AppTheme.border,
+  },
+  pickerItemSelected: {
+    backgroundColor: '#E8F3EC',
+  },
+  pickerItemContent: {
+    flex: 1,
+  },
+  pickerItemText: {
+    fontSize: 15,
+    color: AppTheme.textPrimary,
+    fontWeight: '500',
+  },
+  pickerItemTextSelected: {
+    color: AppTheme.primary,
+    fontWeight: '600',
+  },
+  pickerItemDetails: {
+    marginTop: 4,
+  },
+  pickerItemDetail: {
+    fontSize: 12,
+    color: AppTheme.textSecondary,
+    marginTop: 2,
+  },
+  pickerEmptyText: {
+    padding: 16,
+    textAlign: 'center',
+    color: AppTheme.textSecondary,
+    fontSize: 14,
   },
 });

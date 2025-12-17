@@ -62,6 +62,12 @@ export default function EquipeAtletasScreen({ route }: Props) {
   const [atletas, setAtletas] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Categoria da equipe para validação de idade
+  const [teamCategory, setTeamCategory] = useState<{
+    age_min: number | null;
+    age_max: number | null;
+  } | null>(null);
 
   // Modal de atleta (novo/edição)
   const [modalVisible, setModalVisible] = useState(false);
@@ -419,21 +425,40 @@ export default function EquipeAtletasScreen({ route }: Props) {
   const carregarAtletas = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('athletes')
-        .select(
-          'id, full_name, nickname, birthdate, phone, email, image_url, document_front_url, document_back_url'
-        )
-        .eq('team_id', equipeId)
-        .order('full_name', { ascending: true });
+      // Carregar atletas e categoria da equipe em paralelo
+      const [atletasResult, teamResult] = await Promise.all([
+        supabase
+          .from('athletes')
+          .select(
+            'id, full_name, nickname, birthdate, phone, email, image_url, document_front_url, document_back_url'
+          )
+          .eq('team_id', equipeId)
+          .order('full_name', { ascending: true }),
+        supabase
+          .from('teams')
+          .select('category_id, category:categories(age_min, age_max)')
+          .eq('id', equipeId)
+          .single(),
+      ]);
 
-      if (error) {
-        console.error('[EquipeAtletasScreen] Erro carregar atletas:', error.message);
+      if (atletasResult.error) {
+        console.error('[EquipeAtletasScreen] Erro carregar atletas:', atletasResult.error.message);
         Alert.alert('Erro', 'Não foi possível carregar os atletas da equipe.');
         return;
       }
 
-      setAtletas((data ?? []) as Athlete[]);
+      setAtletas((atletasResult.data ?? []) as Athlete[]);
+
+      // Extrair categoria da equipe
+      if (teamResult.data && (teamResult.data as any).category) {
+        const category = (teamResult.data as any).category;
+        setTeamCategory({
+          age_min: category.age_min,
+          age_max: category.age_max,
+        });
+      } else {
+        setTeamCategory(null);
+      }
     } catch (err) {
       console.error('[EquipeAtletasScreen] Erro inesperado carregar atletas:', err);
       Alert.alert('Erro', 'Ocorreu um erro inesperado ao carregar os atletas.');
@@ -710,10 +735,28 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
   // ========================= RENDERIZAÇÃO =========================
 
+  function verificarIdadeForaDoPermitido(idade: number | null): boolean {
+    if (idade === null || !teamCategory) return false;
+    
+    const { age_min, age_max } = teamCategory;
+    
+    // Se não há restrições de idade, não está fora do permitido
+    if (age_min === null && age_max === null) return false;
+    
+    // Verificar se está abaixo da idade mínima
+    if (age_min !== null && idade < age_min) return true;
+    
+    // Verificar se está acima da idade máxima
+    if (age_max !== null && idade > age_max) return true;
+    
+    return false;
+  }
+
   function renderItem({ item }: { item: Athlete }) {
     const idade = calcularIdade(item.birthdate);
     const temDocumento =
       !!item.document_front_url || !!item.document_back_url;
+    const idadeForaDoPermitido = verificarIdadeForaDoPermitido(idade);
 
     return (
       <View style={styles.card}>
@@ -740,7 +783,17 @@ export default function EquipeAtletasScreen({ route }: Props) {
             </TouchableOpacity>
 
             <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>{item.full_name}</Text>
+              <View style={styles.cardTitleRow}>
+                <Text style={styles.cardTitle}>{item.full_name}</Text>
+                {idadeForaDoPermitido && (
+                  <Ionicons
+                    name="warning"
+                    size={20}
+                    color="#FF6B35"
+                    style={styles.ageWarningIcon}
+                  />
+                )}
+              </View>
               {item.nickname ? (
                 <Text style={styles.cardLineMuted}>Apelido: {item.nickname}</Text>
               ) : null}
@@ -748,7 +801,12 @@ export default function EquipeAtletasScreen({ route }: Props) {
           </View>
 
           {idade !== null && (
-            <Text style={styles.cardBadge}>{idade} anos</Text>
+            <Text style={[
+              styles.cardBadge,
+              idadeForaDoPermitido && styles.cardBadgeWarning
+            ]}>
+              {idade} anos
+            </Text>
           )}
         </View>
 
@@ -1293,10 +1351,19 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
   },
+  cardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
   cardTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: AppTheme.textPrimary,
+    flex: 1,
+  },
+  ageWarningIcon: {
+    marginLeft: 6,
   },
   cardBadge: {
     fontSize: 12,
@@ -1306,6 +1373,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8F3EC',
     color: AppTheme.primary,
     overflow: 'hidden',
+  },
+  cardBadgeWarning: {
+    backgroundColor: '#FFF3E0',
+    color: '#FF6B35',
   },
   cardLine: {
     fontSize: 13,
