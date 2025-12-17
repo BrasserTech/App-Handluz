@@ -51,6 +51,7 @@ type FieldErrors = {
   telefone?: string;
   imagem?: string;
   birthdate?: string;
+  email?: string;
 };
 
 export default function EquipeAtletasScreen({ route }: Props) {
@@ -92,6 +93,11 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
 
   // ========================= UTILITÁRIOS =========================
+
+  function validarEmail(email: string): boolean {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email.trim());
+  }
 
   function calcularIdade(dateString: string | null): number | null {
     if (!dateString) return null;
@@ -496,6 +502,11 @@ export default function EquipeAtletasScreen({ route }: Props) {
     if (!formTelefone.trim()) {
       errors.telefone = 'Informe um telefone de contato.';
     }
+    if (!formEmail.trim()) {
+      errors.email = 'Informe um e-mail válido.';
+    } else if (!validarEmail(formEmail)) {
+      errors.email = 'Informe um e-mail válido (exemplo: email@exemplo.com).';
+    }
 
     // imagem é obrigatória apenas se não houver imagem anterior
     if (!imagemAtleta && !editingAthlete?.image_url) {
@@ -529,7 +540,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
         full_name: formNomeCompleto.trim(),
         nickname: formApelido.trim() || null,
         phone: formTelefone.trim(),
-        email: formEmail.trim() || null,
+        email: formEmail.trim(),
         is_active: true,
       };
 
@@ -950,15 +961,31 @@ export default function EquipeAtletasScreen({ route }: Props) {
             )}
 
             {/* E-mail */}
-            <Text style={styles.fieldLabel}>E-mail (opcional)</Text>
+            <Text style={styles.fieldLabel}>
+              E-mail <Text style={styles.requiredStar}>*</Text>
+            </Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                fieldErrors.email ? styles.inputError : null,
+              ]}
               value={formEmail}
-              onChangeText={setFormEmail}
+              onChangeText={text => {
+                setFormEmail(text);
+                if (fieldErrors.email) {
+                  setFieldErrors(prev => ({
+                    ...prev,
+                    email: undefined,
+                  }));
+                }
+              }}
               placeholder="email@exemplo.com"
               keyboardType="email-address"
               autoCapitalize="none"
             />
+            {fieldErrors.email && (
+              <Text style={styles.errorText}>{fieldErrors.email}</Text>
+            )}
 
             {/* Imagem do atleta */}
             <Text style={styles.fieldLabel}>

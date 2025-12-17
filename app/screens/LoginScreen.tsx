@@ -109,6 +109,11 @@ export default function LoginScreen() {
     return `${y}-${m}-${d}`; // yyyy-mm-dd
   }
 
+  function validarEmail(email: string): boolean {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email.trim());
+  }
+
   // ==================== AÇÕES ====================
 
   async function handleLogin() {
@@ -170,6 +175,10 @@ export default function LoginScreen() {
       }
       if (!email.trim()) {
         setLocalError('Informe um e-mail válido.');
+        return;
+      }
+      if (!validarEmail(email)) {
+        setLocalError('Informe um e-mail válido (exemplo: email@exemplo.com).');
         return;
       }
       if (!password || password.length < 6) {
