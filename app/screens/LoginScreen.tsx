@@ -1,5 +1,5 @@
 // app/screens/LoginScreen.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -33,6 +33,8 @@ export default function LoginScreen() {
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
+  const [birthdate, setBirthdate] = useState<string>('');
+  const [birthdateDisplay, setBirthdateDisplay] = useState<string>('');
   
   // Estado para o Role (Padrão: usuario)
   const [role, setRole] = useState<HandluzRole>('usuario');
@@ -41,6 +43,12 @@ export default function LoginScreen() {
   const [rememberMe, setRememberMe] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [localError, setLocalError] = useState<string | null>(null);
+
+  // Refs para navegação entre campos
+  const emailInputRef = useRef<TextInput>(null);
+  const passwordInputRef = useRef<TextInput>(null);
+  const confirmPasswordInputRef = useRef<TextInput>(null);
+  const birthdateInputRef = useRef<TextInput>(null);
 
   const isBusy = loading || submitting;
   const globalError = error ?? null;
@@ -77,19 +85,77 @@ export default function LoginScreen() {
     }
   }
 
+  // Funções para formatação de data de nascimento
+  function formatBirthDisplay(digits: string): string {
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 4) {
+      return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    }
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+  }
+
+  function handleBirthdateChange(text: string) {
+    const digits = text.replace(/\D/g, '').slice(0, 8);
+    setBirthdate(digits);
+    setBirthdateDisplay(formatBirthDisplay(digits));
+  }
+
+  function getBirthdateForPayload(): string | null {
+    if (birthdate.length === 0) return null;
+    if (birthdate.length !== 8) return null;
+    const d = birthdate.slice(0, 2);
+    const m = birthdate.slice(2, 4);
+    const y = birthdate.slice(4, 8);
+    return `${y}-${m}-${d}`; // yyyy-mm-dd
+  }
+
   // ==================== AÇÕES ====================
 
   async function handleLogin() {
     setSubmitting(true);
     setLocalError(null);
 
-    const ok = await signIn(email.trim(), password);
-    await persistRememberState(ok);
+    try {
+      // Verifica se o email existe
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', email.trim())
+        .maybeSingle();
 
-    setSubmitting(false);
+      if (!profile) {
+        setLocalError('Usuário não encontrado ou senha incorreta, verifique as informações digitadas');
+        setSubmitting(false);
+        return;
+      }
 
-    if (ok) {
-      navigation.navigate('ProfileMain' as never);
+      // Verifica a senha
+      const { data: passRow } = await supabase
+        .from('passwords')
+        .select('*')
+        .eq('profile_id', profile.id)
+        .single();
+
+      if (!passRow || passRow.password !== password) {
+        setLocalError('Usuário não encontrado ou senha incorreta, verifique as informações digitadas');
+        setSubmitting(false);
+        return;
+      }
+
+      // Se chegou aqui, email e senha estão corretos
+      const ok = await signIn(email.trim(), password);
+      await persistRememberState(ok);
+
+      if (ok) {
+        navigation.navigate('ProfileMain' as never);
+      } else {
+        setLocalError('Erro ao fazer login. Tente novamente.');
+      }
+    } catch (err) {
+      console.error('[LoginScreen] Erro no login:', err);
+      setLocalError('Erro inesperado ao fazer login. Tente novamente.');
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -114,6 +180,10 @@ export default function LoginScreen() {
         setLocalError('As senhas não coincidem.');
         return;
       }
+      if (!birthdate || birthdate.length !== 8) {
+        setLocalError('Informe a data de nascimento (DD/MM/AAAA).');
+        return;
+      }
 
       // 1) Verifica existência
       const { data: existing, error: existingError } = await supabase
@@ -134,14 +204,17 @@ export default function LoginScreen() {
       }
 
       // 2) Cria perfil salvando a ROLE diretamente
+      // Mapeia 'atleta' para 'usuario' pois o banco não aceita 'atleta' diretamente
       // Se for diretoria, salvamos is_board = true também para garantir, mas a role é o principal
+      const roleToSave = role === 'atleta' ? 'usuario' : role;
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .insert({
           email: email.trim(),
           full_name: fullName.trim(),
-          role: role, // Salva 'usuario', 'atleta' ou 'diretoria'
+          role: roleToSave, // Salva 'usuario', 'diretoria' ou 'admin' (atleta mapeado para usuario)
           is_board: role === 'diretoria', // Mantém coerência com campo legado se existir
+          is_athlete: role === 'atleta', // Marca como atleta quando o role selecionado é 'atleta'
         })
         .select('id')
         .single();
@@ -164,7 +237,35 @@ export default function LoginScreen() {
         return;
       }
 
+      // 4) Se for atleta, cria registro na tabela athletes
+      if (role === 'atleta') {
+        const birthdateFormatted = getBirthdateForPayload();
+        if (birthdateFormatted) {
+          const { error: athleteError } = await supabase
+            .from('athletes')
+            .insert({
+              email: email.trim(),
+              full_name: fullName.trim(),
+              birthdate: birthdateFormatted,
+              is_active: true,
+              // team_id pode ser null, será atribuído depois quando o atleta for adicionado a uma equipe
+            });
+
+          if (athleteError) {
+            console.error('[LoginScreen] Erro ao criar atleta:', athleteError.message);
+            // Não bloqueia o cadastro se falhar criar o atleta, apenas loga o erro
+          }
+        }
+      }
+
       setLocalError(null);
+      // Limpa os campos após cadastro bem-sucedido
+      setFullName('');
+      setBirthdate('');
+      setBirthdateDisplay('');
+      setPassword('');
+      setConfirmPassword('');
+      setRole('usuario');
       setMode('login');
       alert('Conta criada! Faça login.');
       
@@ -293,13 +394,29 @@ export default function LoginScreen() {
               onChangeText={setFullName}
               placeholder="Seu nome"
               placeholderTextColor="#999"
+              returnKeyType="next"
+              onSubmitEditing={() => birthdateInputRef.current?.focus()}
             />
             {renderRoleSelector()}
+            <Text style={styles.fieldLabel}>Data de nascimento</Text>
+            <TextInput
+              ref={birthdateInputRef}
+              style={styles.input}
+              value={birthdateDisplay}
+              onChangeText={handleBirthdateChange}
+              placeholder="DD/MM/AAAA"
+              placeholderTextColor="#999"
+              keyboardType="numeric"
+              maxLength={10}
+              returnKeyType="next"
+              onSubmitEditing={() => emailInputRef.current?.focus()}
+            />
           </>
         )}
 
         <Text style={styles.fieldLabel}>E-mail</Text>
         <TextInput
+          ref={emailInputRef}
           style={styles.input}
           autoCapitalize="none"
           keyboardType="email-address"
@@ -307,28 +424,52 @@ export default function LoginScreen() {
           onChangeText={setEmail}
           placeholder="seu@email.com"
           placeholderTextColor="#999"
+          returnKeyType="next"
+          onSubmitEditing={() => {
+            // Foca no campo de senha quando apertar Enter
+            passwordInputRef.current?.focus();
+          }}
         />
 
         <Text style={styles.fieldLabel}>Senha</Text>
         <TextInput
+          ref={passwordInputRef}
           style={styles.input}
           secureTextEntry
           value={password}
           onChangeText={setPassword}
           placeholder="Senha"
           placeholderTextColor="#999"
+          returnKeyType={mode === 'login' ? 'done' : 'next'}
+          onSubmitEditing={() => {
+            // Quando apertar Enter no campo de senha
+            if (mode === 'login' && !isBusy) {
+              handleLogin();
+            } else if (mode === 'register') {
+              // No cadastro, foca no campo de confirmar senha
+              confirmPasswordInputRef.current?.focus();
+            }
+          }}
         />
 
         {mode === 'register' && (
           <>
             <Text style={styles.fieldLabel}>Confirmar senha</Text>
             <TextInput
+              ref={confirmPasswordInputRef}
               style={styles.input}
               secureTextEntry
               value={confirmPassword}
               onChangeText={setConfirmPassword}
               placeholder="Repita a senha"
               placeholderTextColor="#999"
+              returnKeyType="done"
+              onSubmitEditing={() => {
+                // Quando apertar Enter no campo de confirmar senha, faz o cadastro
+                if (!isBusy) {
+                  handleRegister();
+                }
+              }}
             />
           </>
         )}
@@ -360,14 +501,31 @@ export default function LoginScreen() {
           {mode === 'login' ? (
             <>
               <Text style={styles.switchText}>Ainda não tem conta?</Text>
-              <TouchableOpacity onPress={() => { setMode('register'); setLocalError(null); }}>
+              <TouchableOpacity onPress={() => { 
+                setMode('register'); 
+                setLocalError(null);
+                // Limpa campos do registro
+                setFullName('');
+                setBirthdate('');
+                setBirthdateDisplay('');
+                setRole('usuario');
+              }}>
                 <Text style={styles.switchLink}>Criar conta</Text>
               </TouchableOpacity>
             </>
           ) : (
             <>
               <Text style={styles.switchText}>Já possui conta?</Text>
-              <TouchableOpacity onPress={() => { setMode('login'); setLocalError(null); }}>
+              <TouchableOpacity onPress={() => { 
+                setMode('login'); 
+                setLocalError(null);
+                // Limpa campos do registro
+                setFullName('');
+                setBirthdate('');
+                setBirthdateDisplay('');
+                setConfirmPassword('');
+                setRole('usuario');
+              }}>
                 <Text style={styles.switchLink}>Fazer login</Text>
               </TouchableOpacity>
             </>

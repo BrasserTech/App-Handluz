@@ -61,7 +61,7 @@ export default function ProfileScreen() {
         </Text>
         <TouchableOpacity
           style={styles.loginButton}
-          onPress={() => navigation.navigate('AppTabs' as never, { screen: 'Perfil' })}
+          onPress={() => navigation.navigate('LoginMain' as never)}
           activeOpacity={0.9}
         >
           <Text style={styles.loginButtonText}>Ir para Login</Text>
