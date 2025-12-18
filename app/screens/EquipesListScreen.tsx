@@ -56,7 +56,19 @@ type BoardMember = {
   board_role: string | null;
 };
 
-type ViewMode = 'times' | 'diretoria';
+type ViewMode = 'times' | 'diretoria' | 'atletas_sem_time';
+
+type AthleteWithoutTeam = {
+  id: string;
+  full_name: string;
+  nickname: string | null;
+  email: string | null;
+  phone: string | null;
+  birthdate: string | null;
+  image_url: string | null;
+  team_id: string | null;
+  category_id: number | null;
+};
 
 export default function EquipesListScreen() {
   const { isDiretoriaOrAdmin } = usePermissions();
@@ -72,6 +84,11 @@ export default function EquipesListScreen() {
   const [boardMembers, setBoardMembers] = useState<BoardMember[]>([]);
   const [boardLoading, setBoardLoading] = useState<boolean>(false);
   const [boardRefreshing, setBoardRefreshing] = useState<boolean>(false);
+
+  // Atletas sem time
+  const [athletesWithoutTeam, setAthletesWithoutTeam] = useState<AthleteWithoutTeam[]>([]);
+  const [athletesLoading, setAthletesLoading] = useState<boolean>(false);
+  const [athletesRefreshing, setAthletesRefreshing] = useState<boolean>(false);
 
   // Categorias
   const [categories, setCategories] = useState<Category[]>([]);
@@ -186,6 +203,8 @@ export default function EquipesListScreen() {
   useEffect(() => {
     if (viewMode === 'diretoria') {
       loadBoardMembers();
+    } else if (viewMode === 'atletas_sem_time') {
+      loadAthletesWithoutTeam();
     }
   }, [viewMode, loadBoardMembers]);
 
@@ -193,6 +212,43 @@ export default function EquipesListScreen() {
     setBoardRefreshing(true);
     await loadBoardMembers();
     setBoardRefreshing(false);
+  }
+
+  // ===================== CARREGAR ATLETAS SEM TIME =====================
+
+  const loadAthletesWithoutTeam = useCallback(async () => {
+    setAthletesLoading(true);
+    try {
+      // Buscar atletas que não têm team_id OU não têm category_id
+      const { data, error } = await supabase
+        .from('athletes')
+        .select('id, full_name, nickname, email, phone, birthdate, image_url, team_id, category_id')
+        .or('team_id.is.null,category_id.is.null')
+        .eq('is_active', true)
+        .order('full_name', { ascending: true });
+
+      if (error) {
+        console.error('[EquipesListScreen] Erro ao carregar atletas sem time:', error.message);
+        return;
+      }
+
+      // Filtrar para mostrar apenas atletas que realmente não têm time OU não têm categoria
+      const filtered = (data ?? []).filter(
+        (athlete: any) => !athlete.team_id || !athlete.category_id
+      );
+
+      setAthletesWithoutTeam(filtered as AthleteWithoutTeam[]);
+    } catch (err) {
+      console.error('[EquipesListScreen] Erro inesperado ao carregar atletas sem time:', err);
+    } finally {
+      setAthletesLoading(false);
+    }
+  }, []);
+
+  async function handleAthletesRefresh() {
+    setAthletesRefreshing(true);
+    await loadAthletesWithoutTeam();
+    setAthletesRefreshing(false);
   }
 
   function getRoleLabel(role: RoleValue | null) {
@@ -396,6 +452,54 @@ export default function EquipesListScreen() {
     });
   }
 
+  // ===================== RENDER ATLETAS SEM TIME =====================
+
+  function renderAthleteWithoutTeam({ item }: { item: AthleteWithoutTeam }) {
+    const hasNoTeam = !item.team_id;
+    const hasNoCategory = !item.category_id;
+
+    return (
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle}>{item.full_name}</Text>
+            {item.nickname && (
+              <Text style={styles.cardSubtitle}>{item.nickname}</Text>
+            )}
+          </View>
+        </View>
+
+        <View style={styles.cardContent}>
+          {hasNoTeam && (
+            <View style={styles.warningBadge}>
+              <Ionicons name="warning-outline" size={14} color="#FF9800" />
+              <Text style={styles.warningText}>Sem time</Text>
+            </View>
+          )}
+          {hasNoCategory && (
+            <View style={styles.warningBadge}>
+              <Ionicons name="warning-outline" size={14} color="#FF9800" />
+              <Text style={styles.warningText}>Sem categoria</Text>
+            </View>
+          )}
+          
+          {item.email && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+              <Ionicons name="mail-outline" size={14} color={AppTheme.textSecondary} />
+              <Text style={[styles.infoText, { marginLeft: 6 }]}>{item.email}</Text>
+            </View>
+          )}
+          {item.phone && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+              <Ionicons name="call-outline" size={14} color={AppTheme.textSecondary} />
+              <Text style={[styles.infoText, { marginLeft: 6 }]}>{item.phone}</Text>
+            </View>
+          )}
+        </View>
+      </View>
+    );
+  }
+
   // ===================== RENDER TIMES =====================
 
   function renderEquipe({ item }: { item: Equipe }) {
@@ -566,6 +670,30 @@ export default function EquipesListScreen() {
             Diretoria
           </Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.segmentButton,
+            viewMode === 'atletas_sem_time' && styles.segmentButtonActive,
+          ]}
+          onPress={() => setViewMode('atletas_sem_time')}
+          activeOpacity={0.85}
+        >
+          <Ionicons
+            name="person-remove-outline"
+            size={16}
+            color={viewMode === 'atletas_sem_time' ? '#FFF' : AppTheme.textSecondary}
+            style={{ marginRight: 6 }}
+          />
+          <Text
+            style={[
+              styles.segmentButtonText,
+              viewMode === 'atletas_sem_time' && styles.segmentButtonTextActive,
+            ]}
+          >
+            Sem Time
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Conteúdo de cada aba */}
@@ -598,7 +726,7 @@ export default function EquipesListScreen() {
             />
           )}
         </>
-      ) : (
+      ) : viewMode === 'diretoria' ? (
         <>
           {boardLoading && !boardRefreshing ? (
             <View style={styles.loadingContainer}>
@@ -624,6 +752,37 @@ export default function EquipesListScreen() {
               ListEmptyComponent={
                 <Text style={styles.emptyText}>
                   Nenhum membro de diretoria cadastrado (role = diretoria/admin).
+                </Text>
+              }
+            />
+          )}
+        </>
+      ) : (
+        <>
+          {athletesLoading && !athletesRefreshing ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={AppTheme.primary} />
+            </View>
+          ) : (
+            <FlatList
+              data={athletesWithoutTeam}
+              keyExtractor={item => item.id}
+              contentContainerStyle={
+                athletesWithoutTeam.length === 0
+                  ? styles.emptyListContent
+                  : styles.listContent
+              }
+              renderItem={renderAthleteWithoutTeam}
+              refreshControl={
+                <RefreshControl
+                  refreshing={athletesRefreshing}
+                  onRefresh={handleAthletesRefresh}
+                  tintColor={AppTheme.primary}
+                />
+              }
+              ListEmptyComponent={
+                <Text style={styles.emptyText}>
+                  Todos os atletas estão vinculados a um time e categoria.
                 </Text>
               }
             />
@@ -973,6 +1132,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: AppTheme.textPrimary,
   },
+  cardSubtitle: {
+    fontSize: 13,
+    color: AppTheme.textSecondary,
+    marginTop: 2,
+  },
+  cardContent: {
+    marginTop: 8,
+  },
   cardBadge: {
     fontSize: 12,
     paddingHorizontal: 8,
@@ -981,6 +1148,29 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8F3EC',
     color: AppTheme.primary,
     overflow: 'hidden',
+  },
+  warningBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF3E0',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginBottom: 6,
+    alignSelf: 'flex-start',
+  },
+  warningText: {
+    fontSize: 12,
+    color: '#FF9800',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  infoText: {
+    fontSize: 13,
+    color: AppTheme.textSecondary,
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   cardFooter: {
     flexDirection: 'row',
