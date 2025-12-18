@@ -207,20 +207,6 @@ export default function EquipesListScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    if (viewMode === 'diretoria') {
-      loadBoardMembers();
-    } else if (viewMode === 'atletas_sem_time') {
-      loadAthletesWithoutTeam();
-    }
-  }, [viewMode, loadBoardMembers]);
-
-  async function handleBoardRefresh() {
-    setBoardRefreshing(true);
-    await loadBoardMembers();
-    setBoardRefreshing(false);
-  }
-
   // ===================== CARREGAR ATLETAS SEM TIME =====================
 
   const loadAthletesWithoutTeam = useCallback(async () => {
@@ -251,6 +237,24 @@ export default function EquipesListScreen() {
       setAthletesLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (viewMode === 'diretoria') {
+      loadBoardMembers();
+    } else if (viewMode === 'atletas_sem_time' && isDiretoriaOrAdmin) {
+      loadAthletesWithoutTeam();
+    }
+    // Se o usuário não tem permissão e está na aba atletas_sem_time, voltar para times
+    if (viewMode === 'atletas_sem_time' && !isDiretoriaOrAdmin) {
+      setViewMode('times');
+    }
+  }, [viewMode, loadBoardMembers, loadAthletesWithoutTeam, isDiretoriaOrAdmin]);
+
+  async function handleBoardRefresh() {
+    setBoardRefreshing(true);
+    await loadBoardMembers();
+    setBoardRefreshing(false);
+  }
 
   async function handleAthletesRefresh() {
     setAthletesRefreshing(true);
@@ -763,29 +767,31 @@ export default function EquipesListScreen() {
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[
-            styles.segmentButton,
-            viewMode === 'atletas_sem_time' && styles.segmentButtonActive,
-          ]}
-          onPress={() => setViewMode('atletas_sem_time')}
-          activeOpacity={0.85}
-        >
-          <Ionicons
-            name="person-remove-outline"
-            size={16}
-            color={viewMode === 'atletas_sem_time' ? '#FFF' : AppTheme.textSecondary}
-            style={{ marginRight: 6 }}
-          />
-          <Text
+        {isDiretoriaOrAdmin && (
+          <TouchableOpacity
             style={[
-              styles.segmentButtonText,
-              viewMode === 'atletas_sem_time' && styles.segmentButtonTextActive,
+              styles.segmentButton,
+              viewMode === 'atletas_sem_time' && styles.segmentButtonActive,
             ]}
+            onPress={() => setViewMode('atletas_sem_time')}
+            activeOpacity={0.85}
           >
-            Sem Time
-          </Text>
-        </TouchableOpacity>
+            <Ionicons
+              name="person-remove-outline"
+              size={16}
+              color={viewMode === 'atletas_sem_time' ? '#FFF' : AppTheme.textSecondary}
+              style={{ marginRight: 6 }}
+            />
+            <Text
+              style={[
+                styles.segmentButtonText,
+                viewMode === 'atletas_sem_time' && styles.segmentButtonTextActive,
+              ]}
+            >
+              Sem Time
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Conteúdo de cada aba */}
@@ -849,7 +855,7 @@ export default function EquipesListScreen() {
             />
           )}
         </>
-      ) : (
+      ) : viewMode === 'atletas_sem_time' && isDiretoriaOrAdmin ? (
         <>
           {athletesLoading && !athletesRefreshing ? (
             <View style={styles.loadingContainer}>
@@ -880,7 +886,7 @@ export default function EquipesListScreen() {
             />
           )}
         </>
-      )}
+      ) : null}
 
       {/* FAB apenas na aba Times e para diretoria/admin */}
       {viewMode === 'times' && isDiretoriaOrAdmin && (
