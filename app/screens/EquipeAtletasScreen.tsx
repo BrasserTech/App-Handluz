@@ -574,9 +574,25 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
       // ---------- CRIAÇÃO ----------
       if (!editingAthlete) {
+        // Buscar category_id do time antes de inserir o atleta
+        const { data: teamData, error: teamError } = await supabase
+          .from('teams')
+          .select('category_id')
+          .eq('id', equipeId)
+          .single();
+
+        if (teamError) {
+          console.error(
+            '[EquipeAtletasScreen] Erro ao buscar categoria do time:',
+            teamError.message
+          );
+          // Continua mesmo se não conseguir buscar a categoria
+        }
+
         const payloadInsert: any = {
           ...basePayload,
           team_id: equipeId,
+          category_id: teamData?.category_id || null, // Define category_id diretamente no insert
         };
 
         const { data: created, error: createError } = await supabase

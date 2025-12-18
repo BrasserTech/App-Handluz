@@ -242,6 +242,35 @@ export default function EquipesListScreen() {
           Alert.alert('Erro', 'Não foi possível atualizar a equipe.');
           return;
         }
+
+        // Atualizar category_id de todos os atletas do time quando a categoria muda
+        if (formCategoriaId) {
+          const { error: updateAthletesError } = await supabase
+            .from('athletes')
+            .update({ category_id: formCategoriaId })
+            .eq('team_id', editingEquipe.id);
+
+          if (updateAthletesError) {
+            console.error(
+              '[EquipesListScreen] Erro ao atualizar categoria dos atletas:',
+              updateAthletesError.message
+            );
+            // Não bloqueia, apenas loga o erro
+          }
+        } else {
+          // Se a categoria foi removida, limpar category_id dos atletas
+          const { error: updateAthletesError } = await supabase
+            .from('athletes')
+            .update({ category_id: null })
+            .eq('team_id', editingEquipe.id);
+
+          if (updateAthletesError) {
+            console.error(
+              '[EquipesListScreen] Erro ao limpar categoria dos atletas:',
+              updateAthletesError.message
+            );
+          }
+        }
       } else {
         // Criação
         const { error } = await supabase.from('teams').insert({
