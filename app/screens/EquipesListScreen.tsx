@@ -108,6 +108,13 @@ export default function EquipesListScreen() {
   const [boardRoleInput, setBoardRoleInput] = useState<string>('');
   const [savingBoardRole, setSavingBoardRole] = useState<boolean>(false);
 
+  // Modal edição de atleta sem time
+  const [athleteEditModalVisible, setAthleteEditModalVisible] = useState<boolean>(false);
+  const [editingAthlete, setEditingAthlete] = useState<AthleteWithoutTeam | null>(null);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [teamPickerVisible, setTeamPickerVisible] = useState<boolean>(false);
+  const [savingAthlete, setSavingAthlete] = useState<boolean>(false);
+
   // aba selecionada (Times / Diretoria)
   const [viewMode, setViewMode] = useState<ViewMode>('times');
 
@@ -452,6 +459,79 @@ export default function EquipesListScreen() {
     });
   }
 
+  // ===================== EDIÇÃO DE ATLETA SEM TIME =====================
+
+  function openAthleteEditModal(athlete: AthleteWithoutTeam) {
+    setEditingAthlete(athlete);
+    setSelectedTeamId(athlete.team_id || null);
+    setAthleteEditModalVisible(true);
+  }
+
+  async function handleSaveAthleteTeam() {
+    if (!editingAthlete) return;
+    if (!selectedTeamId) {
+      Alert.alert('Atenção', 'Selecione um time para vincular o atleta.');
+      return;
+    }
+
+    setSavingAthlete(true);
+
+    try {
+      // Buscar category_id do time selecionado
+      const { data: teamData, error: teamError } = await supabase
+        .from('teams')
+        .select('category_id')
+        .eq('id', selectedTeamId)
+        .single();
+
+      if (teamError) {
+        console.error(
+          '[EquipesListScreen] Erro ao buscar categoria do time:',
+          teamError.message
+        );
+        Alert.alert('Erro', 'Não foi possível buscar a categoria do time.');
+        setSavingAthlete(false);
+        return;
+      }
+
+      // Atualizar atleta com team_id e category_id
+      const { error: updateError } = await supabase
+        .from('athletes')
+        .update({
+          team_id: selectedTeamId,
+          category_id: teamData?.category_id || null,
+        })
+        .eq('id', editingAthlete.id);
+
+      if (updateError) {
+        console.error(
+          '[EquipesListScreen] Erro ao atualizar atleta:',
+          updateError.message
+        );
+        Alert.alert('Erro', 'Não foi possível vincular o atleta ao time.');
+        setSavingAthlete(false);
+        return;
+      }
+
+      setAthleteEditModalVisible(false);
+      setEditingAthlete(null);
+      setSelectedTeamId(null);
+
+      // Recarregar lista de atletas sem time
+      await loadAthletesWithoutTeam();
+      
+      Alert.alert('Sucesso', 'Atleta vinculado ao time com sucesso!');
+    } catch (err) {
+      console.error(
+        '[EquipesListScreen] Erro inesperado ao atualizar atleta:',
+        err
+      );
+      Alert.alert('Erro', 'Ocorreu um erro inesperado ao vincular o atleta.');
+    } finally {
+      setSavingAthlete(false);
+    }
+  }
+
   // ===================== RENDER ATLETAS SEM TIME =====================
 
   function renderAthleteWithoutTeam({ item }: { item: AthleteWithoutTeam }) {
@@ -467,6 +547,18 @@ export default function EquipesListScreen() {
               <Text style={styles.cardSubtitle}>{item.nickname}</Text>
             )}
           </View>
+          {isDiretoriaOrAdmin && (
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() => openAthleteEditModal(item)}
+            >
+              <Ionicons
+                name="create-outline"
+                size={18}
+                color={AppTheme.primary}
+              />
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.cardContent}>
@@ -937,6 +1029,192 @@ export default function EquipesListScreen() {
                 )}
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal edição de atleta sem time */}
+      <Modal
+        visible={athleteEditModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          if (!savingAthlete) {
+            setAthleteEditModalVisible(false);
+            setEditingAthlete(null);
+            setSelectedTeamId(null);
+          }
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Vincular atleta a um time</Text>
+
+            <Text style={styles.fieldLabel}>Atleta</Text>
+            <Text style={styles.infoValueModal}>
+              {editingAthlete?.full_name || '—'}
+            </Text>
+            {editingAthlete?.nickname && (
+              <Text style={styles.infoValueModalEmail}>
+                Apelido: {editingAthlete.nickname}
+              </Text>
+            )}
+
+            <Text style={styles.fieldLabel}>Time</Text>
+            <TouchableOpacity
+              style={styles.input}
+              onPress={() => setTeamPickerVisible(true)}
+            >
+              <Text
+                style={[
+                  styles.pickerText,
+                  !selectedTeamId && styles.pickerPlaceholder,
+                ]}
+              >
+                {selectedTeamId
+                  ? equipes.find(t => t.id === selectedTeamId)?.name ||
+                    'Selecione um time'
+                  : 'Selecione um time'}
+              </Text>
+              <Ionicons
+                name="chevron-down-outline"
+                size={20}
+                color={AppTheme.textSecondary}
+                style={{ position: 'absolute', right: 10 }}
+              />
+            </TouchableOpacity>
+
+            {selectedTeamId && (
+              <View style={{ marginTop: 8 }}>
+                {(() => {
+                  const selectedTeam = equipes.find(t => t.id === selectedTeamId);
+                  const category = selectedTeam?.category;
+                  return category ? (
+                    <Text style={styles.cardLineSmall}>
+                      Categoria: {category.name}
+                      {category.age_min !== null || category.age_max !== null
+                        ? ` (${category.age_min || '—'} a ${category.age_max || '—'} anos)`
+                        : ''}
+                    </Text>
+                  ) : null;
+                })()}
+              </View>
+            )}
+
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonOutline]}
+                onPress={() => {
+                  if (!savingAthlete) {
+                    setAthleteEditModalVisible(false);
+                    setEditingAthlete(null);
+                    setSelectedTeamId(null);
+                  }
+                }}
+              >
+                <Text style={styles.modalButtonOutlineText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonPrimary]}
+                onPress={handleSaveAthleteTeam}
+                disabled={savingAthlete || !selectedTeamId}
+              >
+                {savingAthlete ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.modalButtonPrimaryText}>Salvar</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal seletor de time para atleta */}
+      <Modal
+        visible={teamPickerVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setTeamPickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.pickerModalCard}>
+            <View style={styles.pickerModalHeader}>
+              <Text style={styles.pickerModalTitle}>Selecione o time</Text>
+              <TouchableOpacity
+                onPress={() => setTeamPickerVisible(false)}
+                style={styles.pickerCloseButton}
+              >
+                <Ionicons name="close" size={24} color={AppTheme.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.pickerList}>
+              <TouchableOpacity
+                style={[
+                  styles.pickerItem,
+                  !selectedTeamId && styles.pickerItemSelected,
+                ]}
+                onPress={() => {
+                  setSelectedTeamId(null);
+                  setTeamPickerVisible(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.pickerItemText,
+                    !selectedTeamId && styles.pickerItemTextSelected,
+                  ]}
+                >
+                  Nenhum time
+                </Text>
+              </TouchableOpacity>
+
+              {equipes.map(team => (
+                <TouchableOpacity
+                  key={team.id}
+                  style={[
+                    styles.pickerItem,
+                    selectedTeamId === team.id && styles.pickerItemSelected,
+                  ]}
+                  onPress={() => {
+                    setSelectedTeamId(team.id);
+                    setTeamPickerVisible(false);
+                  }}
+                >
+                  <View style={styles.pickerItemContent}>
+                    <Text
+                      style={[
+                        styles.pickerItemText,
+                        selectedTeamId === team.id &&
+                          styles.pickerItemTextSelected,
+                      ]}
+                    >
+                      {team.name}
+                    </Text>
+                    {team.category && (
+                      <Text style={styles.pickerItemDetail}>
+                        Categoria: {team.category.name}
+                      </Text>
+                    )}
+                  </View>
+                  {selectedTeamId === team.id && (
+                    <Ionicons
+                      name="checkmark"
+                      size={20}
+                      color={AppTheme.primary}
+                    />
+                  )}
+                </TouchableOpacity>
+              ))}
+
+              {equipes.length === 0 && (
+                <Text style={styles.pickerEmptyText}>
+                  Nenhum time cadastrado
+                </Text>
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
