@@ -105,13 +105,19 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
               <TouchableOpacity
                 key={route.key}
                 onPress={onPress}
-                style={[styles.tabButton, { width: tabWidth }]}
+                style={styles.tabButton}
                 activeOpacity={0.9}
               >
-                <View style={styles.iconContainer}>
-                  <Ionicons name={iconName} size={24} color={isFocused ? '#FFFFFF' : AppTheme.textSecondary} />
+                <View style={[styles.iconContainer, isFocused && styles.iconContainerActive]}>
+                  <View style={styles.iconWrapper}>
+                    <Ionicons 
+                      name={iconName} 
+                      size={24} 
+                      color={isFocused ? '#FFFFFF' : AppTheme.textSecondary}
+                    />
+                  </View>
                   {!isFocused && (
-                    <Text style={styles.tabLabel} numberOfLines={1}>
+                    <Text style={styles.tabLabel} numberOfLines={1} ellipsizeMode="tail">
                       {options.tabBarLabel as string}
                     </Text>
                   )}
@@ -166,7 +172,7 @@ export default function AppNavigator() {
 }
 
 const styles = StyleSheet.create({
-  tabBarContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'transparent' },
+  tabBarContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'transparent', overflow: 'visible' },
   tabBarSurface: { 
     backgroundColor: '#FFFFFF', 
     borderTopLeftRadius: 24, 
@@ -176,23 +182,25 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1, 
     shadowRadius: 8, 
     elevation: 10, 
-    width: '100%' 
+    width: '100%',
+    overflow: 'visible'
   },
-  tabsRow: { flexDirection: 'row', height: 70, alignItems: 'center' },
-  activeIndicatorContainer: { position: 'absolute', top: 0, height: 70, justifyContent: 'center', alignItems: 'center', zIndex: 0 },
+  tabsRow: { flexDirection: 'row', minHeight: 60, alignItems: 'center', paddingBottom: 6, paddingHorizontal: 4, justifyContent: 'center' },
+  activeIndicatorContainer: { position: 'absolute', top: 0, minHeight: 60, justifyContent: 'center', alignItems: 'center', zIndex: 0, pointerEvents: 'none' },
   activeCircle: { 
     width: 48, 
     height: 48, 
     borderRadius: 24, 
     backgroundColor: AppTheme.primary, 
-    marginTop: -10, 
     shadowColor: AppTheme.primary, 
     shadowOffset: { width: 0, height: 4 }, 
     shadowOpacity: 0.3, 
     shadowRadius: 5, 
     elevation: 4 
   },
-  tabButton: { height: 70, justifyContent: 'center', alignItems: 'center', zIndex: 1 },
-  iconContainer: { alignItems: 'center', justifyContent: 'center', marginTop: -10 },
-  tabLabel: { fontSize: 10, color: AppTheme.textSecondary, marginTop: 4, fontWeight: '500', position: 'absolute', bottom: -18 },
+  tabButton: { minHeight: 60, justifyContent: 'center', alignItems: 'center', zIndex: 1, paddingHorizontal: 0, overflow: 'visible', flex: 1 },
+  iconContainer: { alignItems: 'center', justifyContent: 'flex-start', width: '100%', flexShrink: 1, minWidth: 0, paddingTop: 4 },
+  iconContainerActive: { justifyContent: 'center', alignItems: 'center', paddingTop: 0, width: '100%', alignSelf: 'center' },
+  iconWrapper: { alignItems: 'center', justifyContent: 'center', width: 24, height: 24, alignSelf: 'center' },
+  tabLabel: { fontSize: 10, color: AppTheme.textSecondary, marginTop: 4, fontWeight: '500', textAlign: 'center', width: '100%', flexShrink: 1, minWidth: 0 },
 });

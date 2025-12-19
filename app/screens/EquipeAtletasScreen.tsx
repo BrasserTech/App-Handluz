@@ -19,6 +19,7 @@ import {
   TouchableWithoutFeedback,
   ScrollView,
   Platform,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -1255,7 +1256,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
           }
         }}
       >
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, { paddingTop: insets.top + 10, paddingBottom: insets.bottom + 10 }]}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>
               {editingAthlete ? 'Editar atleta' : 'Novo atleta'}
@@ -1951,12 +1952,16 @@ const styles = StyleSheet.create({
   cardBottomRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginTop: 6,
+    flexWrap: 'wrap',
   },
   cardLinksRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    flex: 1,
+    minWidth: 0,
   },
   docTag: {
     flexDirection: 'row',
@@ -1965,7 +1970,8 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 999,
     backgroundColor: '#E8F3EC',
-    marginRight: 8,
+    marginRight: 6,
+    marginBottom: 4,
   },
   docTagText: {
     fontSize: 12,
@@ -1981,6 +1987,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: AppTheme.border,
     backgroundColor: '#FFFFFF',
+    marginRight: 6,
+    marginBottom: 4,
   },
   viewDocsText: {
     fontSize: 12,
@@ -1990,6 +1998,7 @@ const styles = StyleSheet.create({
   cardAdminActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginLeft: 8,
   },
   iconButton: {
     paddingHorizontal: 8,
@@ -2035,30 +2044,32 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
+    paddingTop: 10,
   },
   modalCard: {
     width: '100%',
     maxWidth: 460,
     backgroundColor: AppTheme.surface,
     borderRadius: 16,
-    padding: 16,
+    padding: 10,
     borderWidth: 1,
     borderColor: AppTheme.border,
+    maxHeight: Dimensions.get('window').height * 0.95,
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: AppTheme.textPrimary,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   fieldLabel: {
-    fontSize: 13,
+    fontSize: 12,
     color: AppTheme.textSecondary,
-    marginBottom: 4,
-    marginTop: 8,
+    marginBottom: 3,
+    marginTop: 6,
   },
   requiredStar: {
     color: '#D32F2F',
@@ -2068,30 +2079,31 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderColor: AppTheme.border,
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 8,
     paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingVertical: 6,
     fontSize: 14,
+    minHeight: 40,
   },
   inputError: {
     borderColor: '#D32F2F',
   },
   errorText: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#D32F2F',
-    marginTop: 2,
+    marginTop: 1,
   },
   imageRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: 2,
   },
   imageButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 6,
     paddingHorizontal: 10,
-    borderRadius: 10,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: AppTheme.border,
     backgroundColor: '#FFFFFF',
@@ -2110,24 +2122,24 @@ const styles = StyleSheet.create({
     color: AppTheme.textMuted,
   },
   imagePreview: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     marginLeft: 10,
   },
   modalButtonsRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    marginTop: 16,
+    marginTop: 10,
   },
   modalButtonsRowWithDelete: {
     justifyContent: 'space-between',
   },
   modalButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    marginLeft: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginLeft: 6,
   },
   modalButtonOutline: {
     borderWidth: 1,
@@ -2135,14 +2147,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   modalButtonOutlineText: {
-    fontSize: 14,
+    fontSize: 13,
     color: AppTheme.textSecondary,
   },
   modalButtonPrimary: {
     backgroundColor: AppTheme.primary,
   },
   modalButtonPrimaryText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: '#FFFFFF',
   },
@@ -2288,8 +2300,8 @@ const styles = StyleSheet.create({
   pdfPreview: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
-    padding: 8,
+    marginTop: 4,
+    padding: 6,
     backgroundColor: '#F5F5F5',
     borderRadius: 8,
     borderWidth: 1,

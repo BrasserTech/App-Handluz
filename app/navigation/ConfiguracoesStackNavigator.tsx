@@ -30,7 +30,7 @@ export default function ConfiguracoesStackNavigator() {
         headerLeft: () => (
           <TouchableOpacity 
             onPress={() => navigation.goBack()} 
-            style={{ marginRight: 15, padding: 5 }}
+            style={{ marginRight: 15, padding: 5, alignItems: 'center', justifyContent: 'center' }}
           >
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>

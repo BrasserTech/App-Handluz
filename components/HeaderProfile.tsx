@@ -67,6 +67,10 @@ const styles = StyleSheet.create({
   settingsButton: {
     marginRight: 12,
     padding: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 32,
+    height: 32,
   },
   profileWrapper: {
     flexDirection: 'row',

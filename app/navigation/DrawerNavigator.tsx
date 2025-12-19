@@ -42,58 +42,76 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
       <DrawerItem
         label="Início"
         labelStyle={styles.drawerLabel}
+        iconStyle={styles.drawerIcon}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Inicio' })}
         icon={({ size, color }) => (
-          <Ionicons name="home-outline" color={color ?? '#FFF'} size={size ?? 20} />
+          <View style={styles.iconWrapper}>
+            <Ionicons name="home-outline" color={color ?? '#FFF'} size={size ?? 20} />
+          </View>
         )}
       />
 
       <DrawerItem
         label="Atletas"
         labelStyle={styles.drawerLabel}
+        iconStyle={styles.drawerIcon}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Atletas' })}
         icon={({ size, color }) => (
-          <Ionicons name="people-outline" color={color ?? '#FFF'} size={size ?? 20} />
+          <View style={styles.iconWrapper}>
+            <Ionicons name="people-outline" color={color ?? '#FFF'} size={size ?? 20} />
+          </View>
         )}
       />
 
       <DrawerItem
         label="Equipes"
         labelStyle={styles.drawerLabel}
+        iconStyle={styles.drawerIcon}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Equipes' })}
         icon={({ size, color }) => (
-          <Ionicons
-            name="shield-checkmark-outline"
-            color={color ?? '#FFF'}
-            size={size ?? 20}
-          />
+          <View style={styles.iconWrapper}>
+            <Ionicons
+              name="shield-checkmark-outline"
+              color={color ?? '#FFF'}
+              size={size ?? 20}
+            />
+          </View>
         )}
       />
 
       <DrawerItem
         label="Treinos"
         labelStyle={styles.drawerLabel}
+        iconStyle={styles.drawerIcon}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Treinos' })}
         icon={({ size, color }) => (
-          <Ionicons name="calendar-outline" color={color ?? '#FFF'} size={size ?? 20} />
+          <View style={styles.iconWrapper}>
+            <Ionicons name="calendar-outline" color={color ?? '#FFF'} size={size ?? 20} />
+          </View>
         )}
       />
 
       <DrawerItem
         label="Produtos"
         labelStyle={styles.drawerLabel}
+        iconStyle={styles.drawerIcon}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Produtos' })}
         icon={({ size, color }) => (
-          <Ionicons name="pricetags-outline" color={color ?? '#FFF'} size={size ?? 20} />
+          <View style={styles.iconWrapper}>
+            <Ionicons name="pricetags-outline" color={color ?? '#FFF'} size={size ?? 20} />
+          </View>
         )}
       />
 
       <DrawerItem
         label="Diretoria"
         labelStyle={styles.drawerLabel}
+        iconStyle={styles.drawerIcon}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Diretoria' })}
         icon={({ size, color }) => (
-          <Ionicons name="business-outline" color={color ?? '#FFF'} size={size ?? 20} />
+          <View style={styles.iconWrapper}>
+            <Ionicons name="business-outline" color={color ?? '#FFF'} size={size ?? 20} />
+          </View>
         )}
       />
     </DrawerContentScrollView>
@@ -148,5 +166,17 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 15,
     marginLeft: -10,
+  },
+  drawerIcon: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 24,
+    height: 24,
+  },
+  iconWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 24,
+    height: 24,
   },
 });
