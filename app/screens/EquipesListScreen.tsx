@@ -17,12 +17,15 @@ import {
   Image,
   ScrollView,
   TouchableWithoutFeedback,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as Linking from 'expo-linking';
 
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
@@ -72,6 +75,7 @@ type AthleteWithoutTeam = {
   image_url: string | null;
   team_id: string | null;
   category_id: number | null;
+  document_url?: string | null;
 };
 
 export default function EquipesListScreen() {
@@ -129,6 +133,7 @@ export default function EquipesListScreen() {
   const [imagemAtleta, setImagemAtleta] = useState<{ uri: string } | null>(null);
   const [docFrente, setDocFrente] = useState<{ uri: string } | null>(null);
   const [docVerso, setDocVerso] = useState<{ uri: string } | null>(null);
+  const [docPDF, setDocPDF] = useState<{ uri: string } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{
     nome?: string;
     telefone?: string;
@@ -141,6 +146,9 @@ export default function EquipesListScreen() {
     front?: string | null;
     back?: string | null;
   } | null>(null);
+
+  // Preview PDF
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
 
   // aba selecionada (Times / Diretoria)
   const [viewMode, setViewMode] = useState<ViewMode>('times');
@@ -242,7 +250,7 @@ export default function EquipesListScreen() {
       // Buscar atletas que não têm team_id OU não têm category_id
       const { data, error } = await supabase
         .from('athletes')
-        .select('id, full_name, nickname, email, phone, birthdate, image_url, team_id, category_id')
+        .select('id, full_name, nickname, email, phone, birthdate, image_url, team_id, category_id, document_url')
         .or('team_id.is.null,category_id.is.null')
         .eq('is_active', true)
         .order('full_name', { ascending: true });
@@ -552,6 +560,73 @@ export default function EquipesListScreen() {
     setImage({ uri: asset.uri });
   }
 
+  async function pickPDF(setPDF: (pdf: { uri: string } | null) => void) {
+    console.log('[EquipesListScreen] pickPDF chamado');
+    
+    // Para web, usar input file HTML nativo
+    if (Platform.OS === 'web') {
+      console.log('[EquipesListScreen] Usando input file para web');
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/pdf';
+      input.style.display = 'none';
+      
+      input.onchange = (e: Event) => {
+        const target = e.target as HTMLInputElement;
+        const file = target.files?.[0];
+        if (file) {
+          if (file.type !== 'application/pdf') {
+            Alert.alert('Erro', 'Por favor, selecione apenas arquivos PDF.');
+            return;
+          }
+          const uri = URL.createObjectURL(file);
+          console.log('[EquipesListScreen] PDF selecionado (web):', uri);
+          setPDF({ uri });
+        }
+        document.body.removeChild(input);
+      };
+      
+      document.body.appendChild(input);
+      input.click();
+      return;
+    }
+
+    // Para mobile, usar DocumentPicker
+    try {
+      console.log('[EquipesListScreen] Iniciando seleção de PDF (mobile)...');
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+      });
+
+      console.log('[EquipesListScreen] Resultado do DocumentPicker:', JSON.stringify(result, null, 2));
+
+      // Verificar se foi cancelado
+      if ('canceled' in result && result.canceled) {
+        console.log('[EquipesListScreen] Seleção cancelada pelo usuário');
+        return;
+      }
+
+      // Verificar se o tipo é success
+      if (result.type === 'success') {
+        const uri = result.uri || (result as any).fileUri;
+        if (uri) {
+          console.log('[EquipesListScreen] PDF selecionado com sucesso:', uri);
+          setPDF({ uri });
+        } else {
+          console.error('[EquipesListScreen] URI não encontrada no resultado:', result);
+          Alert.alert('Erro', 'Não foi possível obter o caminho do arquivo selecionado.');
+        }
+      } else {
+        console.warn('[EquipesListScreen] Resultado inesperado:', result);
+        Alert.alert('Aviso', 'Não foi possível processar o arquivo selecionado.');
+      }
+    } catch (err) {
+      console.error('[EquipesListScreen] Erro ao selecionar PDF:', err);
+      Alert.alert('Erro', `Não foi possível selecionar o arquivo PDF: ${err instanceof Error ? err.message : 'Erro desconhecido'}`);
+    }
+  }
+
   async function uploadImageToStorage(
     picked: { uri: string },
     pathPrefix: string
@@ -632,6 +707,64 @@ export default function EquipesListScreen() {
     }
   }
 
+  // Função para upload de PDF no bucket pdfDocuments
+  async function uploadPDFDocument(
+    picked: { uri: string },
+    pathPrefix: string
+  ): Promise<string | null> {
+    try {
+      let blob: Blob;
+      
+      // Para web, o URI pode ser um blob URL, precisamos obter o arquivo original
+      if (Platform.OS === 'web' && picked.uri.startsWith('blob:')) {
+        const response = await fetch(picked.uri);
+        blob = await response.blob();
+      } else {
+        const response = await fetch(picked.uri);
+        blob = await response.blob();
+      }
+
+      // Validar se é PDF pela extensão ou tipo
+      const fileName = picked.uri.split('/').pop() || '';
+      const fileExtension = fileName.split('.').pop()?.toLowerCase() || '';
+      const isPDF = fileExtension === 'pdf' || blob.type === 'application/pdf';
+      
+      if (!isPDF) {
+        Alert.alert('Erro', 'O arquivo selecionado não é um PDF válido.');
+        return null;
+      }
+
+      const filePath = `${pathPrefix}-${Date.now()}.pdf`;
+
+      // Upload para o bucket pdfDocuments
+      const { data, error } = await supabase.storage
+        .from('pdfDocuments')
+        .upload(filePath, blob, {
+          upsert: true,
+          contentType: 'application/pdf',
+        });
+
+      if (error) {
+        console.error('[EquipesListScreen] Erro upload PDF:', error.message);
+        Alert.alert(
+          'Erro no upload',
+          `Não foi possível fazer o upload do PDF: ${error.message}`
+        );
+        return null;
+      }
+
+      const { data: publicData } = supabase.storage
+        .from('pdfDocuments')
+        .getPublicUrl(data.path);
+
+      return publicData.publicUrl ?? null;
+    } catch (err) {
+      console.error('[EquipesListScreen] Erro inesperado upload PDF:', err);
+      Alert.alert('Erro', 'Ocorreu um erro ao fazer o upload do PDF.');
+      return null;
+    }
+  }
+
   function validarCampos(): boolean {
     const errors: typeof fieldErrors = {};
 
@@ -691,6 +824,7 @@ export default function EquipesListScreen() {
     setImagemAtleta(null);
     setDocFrente(null);
     setDocVerso(null);
+    setDocPDF(null);
     setFieldErrors({});
     setAthleteEditModalVisible(true);
   }
@@ -707,7 +841,7 @@ export default function EquipesListScreen() {
       const birthdateDb = getBirthdateForPayload();
 
       // Upload de imagens
-      const [imageUrl, docFrontUrl, docBackUrl] = await Promise.all([
+      const [imageUrl, docFrontUrl, docBackUrl, docPDFUrl] = await Promise.all([
         imagemAtleta
           ? uploadImageToStorage(imagemAtleta, `${athleteId}-photo`)
           : Promise.resolve(null),
@@ -716,6 +850,9 @@ export default function EquipesListScreen() {
           : Promise.resolve(null),
         docVerso
           ? uploadEncryptedDocument(docVerso, `${athleteId}-doc-back`)
+          : Promise.resolve(null),
+        docPDF
+          ? uploadPDFDocument(docPDF, `${athleteId}-doc-pdf`)
           : Promise.resolve(null),
       ]);
 
@@ -737,6 +874,7 @@ export default function EquipesListScreen() {
 
       if (docFrontUrl) updatePayload.document_front_url = docFrontUrl;
       if (docBackUrl) updatePayload.document_back_url = docBackUrl;
+      if (docPDFUrl) updatePayload.document_url = docPDFUrl;
 
       // Se um time foi selecionado, vincular o atleta
       if (selectedTeamId) {
@@ -790,6 +928,7 @@ export default function EquipesListScreen() {
       setImagemAtleta(null);
       setDocFrente(null);
       setDocVerso(null);
+      setDocPDF(null);
       setFieldErrors({});
 
       // Recarregar lista de atletas sem time
@@ -812,6 +951,7 @@ export default function EquipesListScreen() {
   function renderAthleteWithoutTeam({ item }: { item: AthleteWithoutTeam }) {
     const hasNoTeam = !item.team_id;
     const hasNoCategory = !item.category_id;
+    const temPDF = !!item.document_url;
 
     return (
       <View style={styles.card}>
@@ -861,6 +1001,35 @@ export default function EquipesListScreen() {
               <Ionicons name="call-outline" size={14} color={AppTheme.textSecondary} />
               <Text style={[styles.infoText, { marginLeft: 6 }]}>{item.phone}</Text>
             </View>
+          )}
+
+          {/* Botão para ver PDF */}
+          {isDiretoriaOrAdmin && temPDF && (
+            <TouchableOpacity
+              style={styles.viewDocsButton}
+              onPress={async () => {
+                if (Platform.OS === 'web') {
+                  setPdfPreviewUrl(item.document_url!);
+                } else {
+                  // Para mobile, abrir PDF no navegador
+                  const url = item.document_url!;
+                  const canOpen = await Linking.canOpenURL(url);
+                  if (canOpen) {
+                    await Linking.openURL(url);
+                  } else {
+                    Alert.alert('Erro', 'Não foi possível abrir o PDF.');
+                  }
+                }
+              }}
+            >
+              <Ionicons
+                name="document-attach-outline"
+                size={14}
+                color={AppTheme.primary}
+                style={{ marginRight: 4 }}
+              />
+              <Text style={styles.viewDocsText}>Ver PDF</Text>
+            </TouchableOpacity>
           )}
         </View>
       </View>
@@ -1553,6 +1722,51 @@ export default function EquipesListScreen() {
                 />
               )}
 
+              {/* Anexo PDF */}
+              <Text style={styles.fieldLabel}>
+                Anexo PDF (opcional)
+              </Text>
+              <View style={styles.imageRow}>
+                <TouchableOpacity
+                  style={styles.imageButton}
+                  onPress={() => pickPDF(setDocPDF)}
+                >
+                  <Ionicons
+                    name="document-attach-outline"
+                    size={18}
+                    color={AppTheme.primary}
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.imageButtonText}>
+                    {docPDF ? 'Trocar PDF' : 'Escolher PDF'}
+                  </Text>
+                </TouchableOpacity>
+
+                {docPDF && (
+                  <TouchableOpacity
+                    onPress={() => setDocPDF(null)}
+                    style={{ marginLeft: 8 }}
+                  >
+                    <Ionicons
+                      name="close-circle-outline"
+                      size={24}
+                      color="#D32F2F"
+                    />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {docPDF && (
+                <View style={styles.pdfPreview}>
+                  <Ionicons
+                    name="document-text-outline"
+                    size={24}
+                    color={AppTheme.primary}
+                  />
+                  <Text style={styles.pdfPreviewText}>PDF selecionado</Text>
+                </View>
+              )}
+
               {/* Time */}
               <Text style={styles.fieldLabel}>Time (opcional)</Text>
               <TouchableOpacity
@@ -1613,6 +1827,7 @@ export default function EquipesListScreen() {
                       setImagemAtleta(null);
                       setDocFrente(null);
                       setDocVerso(null);
+                      setDocPDF(null);
                       setFieldErrors({});
                     }
                   }}
@@ -1815,6 +2030,77 @@ export default function EquipesListScreen() {
             </ScrollView>
           </View>
         </View>
+      </Modal>
+
+      {/* Modal de preview de PDF */}
+      <Modal
+        visible={!!pdfPreviewUrl}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPdfPreviewUrl(null)}
+      >
+        <TouchableWithoutFeedback onPress={() => setPdfPreviewUrl(null)}>
+          <View style={styles.previewOverlay}>
+            <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()}>
+              <View style={styles.pdfPreviewCard}>
+                <View style={styles.pdfPreviewHeader}>
+                  <Text style={styles.docsTitle}>PDF do Atleta</Text>
+                  <TouchableOpacity
+                    style={styles.previewCloseButton}
+                    onPress={() => setPdfPreviewUrl(null)}
+                  >
+                    <Ionicons name="close" size={24} color="#FFF" />
+                  </TouchableOpacity>
+                </View>
+
+                {Platform.OS === 'web' && pdfPreviewUrl ? (
+                  <iframe
+                    src={pdfPreviewUrl}
+                    style={{
+                      width: '100%',
+                      height: '600px',
+                      border: 'none',
+                      borderRadius: 8,
+                    }}
+                    title="PDF Viewer"
+                  />
+                ) : (
+                  <View style={styles.pdfPreviewContent}>
+                    <Ionicons
+                      name="document-text-outline"
+                      size={48}
+                      color={AppTheme.primary}
+                    />
+                    <Text style={styles.pdfPreviewText}>
+                      PDF disponível
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.pdfOpenButton}
+                      onPress={async () => {
+                        if (pdfPreviewUrl) {
+                          const canOpen = await Linking.canOpenURL(pdfPreviewUrl);
+                          if (canOpen) {
+                            await Linking.openURL(pdfPreviewUrl);
+                          } else {
+                            Alert.alert('Erro', 'Não foi possível abrir o PDF.');
+                          }
+                        }
+                      }}
+                    >
+                      <Ionicons
+                        name="open-outline"
+                        size={18}
+                        color="#FFF"
+                        style={{ marginRight: 6 }}
+                      />
+                      <Text style={styles.pdfOpenButtonText}>Abrir PDF</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
     </View>
   );
@@ -2232,5 +2518,95 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: AppTheme.textSecondary,
     fontSize: 14,
+  },
+  pdfPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    padding: 8,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+  },
+  pdfPreviewText: {
+    marginLeft: 8,
+    fontSize: 13,
+    color: AppTheme.textPrimary,
+    fontWeight: '500',
+  },
+  pdfPreviewCard: {
+    width: '100%',
+    maxWidth: 900,
+    maxHeight: '90%',
+    borderRadius: 16,
+    padding: 16,
+    backgroundColor: AppTheme.surface,
+    position: 'relative',
+  },
+  pdfPreviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: AppTheme.border,
+  },
+  pdfPreviewContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  pdfOpenButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: AppTheme.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginTop: 16,
+  },
+  pdfOpenButtonText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  previewCloseButton: {
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 20,
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  docsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: AppTheme.textPrimary,
+    marginBottom: 16,
+  },
+  viewDocsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#E8F3EC',
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  viewDocsText: {
+    fontSize: 12,
+    color: AppTheme.primary,
+    fontWeight: '600',
   },
 });
