@@ -17,6 +17,7 @@ import {
   Alert,
   Image,
   TouchableWithoutFeedback,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -68,6 +69,11 @@ export default function EquipeAtletasScreen({ route }: Props) {
     age_min: number | null;
     age_max: number | null;
   } | null>(null);
+
+  // Lista de times para seleção (ao editar atleta)
+  const [allTeams, setAllTeams] = useState<Array<{ id: string; name: string; category_id: number | null }>>([]);
+  const [selectedTeamIdForEdit, setSelectedTeamIdForEdit] = useState<string | null>(null);
+  const [teamPickerVisible, setTeamPickerVisible] = useState(false);
 
   // Modal de atleta (novo/edição)
   const [modalVisible, setModalVisible] = useState(false);
@@ -471,6 +477,21 @@ export default function EquipeAtletasScreen({ route }: Props) {
     carregarAtletas();
   }, [carregarAtletas]);
 
+  // Carregar lista de times para seleção
+  useEffect(() => {
+    async function loadAllTeams() {
+      const { data, error } = await supabase
+        .from('teams')
+        .select('id, name, category_id')
+        .order('name', { ascending: true });
+      
+      if (!error && data) {
+        setAllTeams(data as Array<{ id: string; name: string; category_id: number | null }>);
+      }
+    }
+    loadAllTeams();
+  }, []);
+
   async function handleRefresh() {
     setRefreshing(true);
     await carregarAtletas();
@@ -510,6 +531,20 @@ export default function EquipeAtletasScreen({ route }: Props) {
       setBirthDigits('');
       setBirthDisplay('');
     }
+
+    // Buscar team_id do atleta para preencher o seletor de time
+    supabase
+      .from('athletes')
+      .select('team_id')
+      .eq('id', atleta.id)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setSelectedTeamIdForEdit((data as any).team_id || null);
+        } else {
+          setSelectedTeamIdForEdit(null);
+        }
+      });
 
     setImagemAtleta(null);
     setDocFrente(null);
@@ -679,6 +714,25 @@ export default function EquipeAtletasScreen({ route }: Props) {
         
         if (docFrontUrl) updatePayload.document_front_url = docFrontUrl;
         if (docBackUrl) updatePayload.document_back_url = docBackUrl;
+
+        // Se um time foi selecionado, atualizar team_id e category_id
+        if (selectedTeamIdForEdit) {
+          const selectedTeam = allTeams.find(t => t.id === selectedTeamIdForEdit);
+          if (selectedTeam) {
+            const { data: teamData } = await supabase
+              .from('teams')
+              .select('category_id')
+              .eq('id', selectedTeamIdForEdit)
+              .single();
+            
+            updatePayload.team_id = selectedTeamIdForEdit;
+            updatePayload.category_id = teamData?.category_id || null;
+          }
+        } else {
+          // Se nenhum time foi selecionado, remover do time (sem time)
+          updatePayload.team_id = null;
+          updatePayload.category_id = null;
+        }
 
         const { error: updateError } = await supabase
           .from('athletes')
@@ -1263,6 +1317,35 @@ export default function EquipeAtletasScreen({ route }: Props) {
               />
             )}
 
+            {/* Time - apenas ao editar */}
+            {editingAthlete && (
+              <>
+                <Text style={styles.fieldLabel}>Time</Text>
+                <TouchableOpacity
+                  style={styles.input}
+                  onPress={() => setTeamPickerVisible(true)}
+                >
+                  <Text
+                    style={[
+                      styles.pickerText,
+                      !selectedTeamIdForEdit && styles.pickerPlaceholder,
+                    ]}
+                  >
+                    {selectedTeamIdForEdit
+                      ? allTeams.find(t => t.id === selectedTeamIdForEdit)?.name ||
+                        'Selecione um time'
+                      : 'Nenhum time (sem time)'}
+                  </Text>
+                  <Ionicons
+                    name="chevron-down-outline"
+                    size={20}
+                    color={AppTheme.textSecondary}
+                    style={{ position: 'absolute', right: 10 }}
+                  />
+                </TouchableOpacity>
+              </>
+            )}
+
             {/* Botões */}
             <View style={[styles.modalButtonsRow, editingAthlete && styles.modalButtonsRowWithDelete]}>
               {/* Botão Excluir - apenas quando está editando */}
@@ -1307,6 +1390,87 @@ export default function EquipeAtletasScreen({ route }: Props) {
                 </TouchableOpacity>
               </View>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal seletor de time para atleta */}
+      <Modal
+        visible={teamPickerVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setTeamPickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.pickerModalCard}>
+            <View style={styles.pickerModalHeader}>
+              <Text style={styles.pickerModalTitle}>Selecione o time</Text>
+              <TouchableOpacity
+                onPress={() => setTeamPickerVisible(false)}
+                style={styles.pickerCloseButton}
+              >
+                <Ionicons name="close" size={24} color={AppTheme.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.pickerList}>
+              <TouchableOpacity
+                style={[
+                  styles.pickerItem,
+                  !selectedTeamIdForEdit && styles.pickerItemSelected,
+                ]}
+                onPress={() => {
+                  setSelectedTeamIdForEdit(null);
+                  setTeamPickerVisible(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.pickerItemText,
+                    !selectedTeamIdForEdit && styles.pickerItemTextSelected,
+                  ]}
+                >
+                  Nenhum time (sem time)
+                </Text>
+              </TouchableOpacity>
+
+              {allTeams.map(team => (
+                <TouchableOpacity
+                  key={team.id}
+                  style={[
+                    styles.pickerItem,
+                    selectedTeamIdForEdit === team.id && styles.pickerItemSelected,
+                  ]}
+                  onPress={() => {
+                    setSelectedTeamIdForEdit(team.id);
+                    setTeamPickerVisible(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.pickerItemText,
+                      selectedTeamIdForEdit === team.id &&
+                        styles.pickerItemTextSelected,
+                    ]}
+                  >
+                    {team.name}
+                  </Text>
+                  {selectedTeamIdForEdit === team.id && (
+                    <Ionicons
+                      name="checkmark"
+                      size={20}
+                      color={AppTheme.primary}
+                    />
+                  )}
+                </TouchableOpacity>
+              ))}
+
+              {allTeams.length === 0 && (
+                <Text style={styles.pickerEmptyText}>
+                  Nenhum time cadastrado
+                </Text>
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1762,5 +1926,73 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: AppTheme.textSecondary,
     textAlign: 'center',
+  },
+
+  // Picker
+  pickerText: {
+    fontSize: 14,
+    color: AppTheme.textPrimary,
+  },
+  pickerPlaceholder: {
+    color: AppTheme.textMuted,
+  },
+  pickerModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: '80%',
+    backgroundColor: AppTheme.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+    overflow: 'hidden',
+  },
+  pickerModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: AppTheme.border,
+  },
+  pickerModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: AppTheme.textPrimary,
+  },
+  pickerCloseButton: {
+    padding: 4,
+  },
+  pickerList: {
+    maxHeight: 400,
+  },
+  pickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: AppTheme.border,
+  },
+  pickerItemSelected: {
+    backgroundColor: '#E8F3EC',
+  },
+  pickerItemText: {
+    fontSize: 15,
+    color: AppTheme.textPrimary,
+    fontWeight: '500',
+  },
+  pickerItemTextSelected: {
+    color: AppTheme.primary,
+    fontWeight: '600',
+  },
+  pickerEmptyText: {
+    padding: 16,
+    textAlign: 'center',
+    color: AppTheme.textSecondary,
+    fontSize: 14,
+  },
+  cardLineSmall: {
+    fontSize: 12,
+    color: AppTheme.textMuted,
   },
 });

@@ -16,16 +16,20 @@ import {
   Modal,
   Image,
   ScrollView,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import * as ImagePicker from 'expo-image-picker';
 
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
 import { usePermissions } from '../../hooks/usePermissions';
 import type { EquipesStackParamList } from '../navigation/EquipesStackNavigator';
+import { encryptImageBlob } from '../services/imageEncryption';
+import EncryptedImage from '../../components/EncryptedImage';
 
 // logo (arquivo em /assets/images/logo_handluz.png)
 const handluzLogo = require('../../assets/images/logo_handluz.png');
@@ -114,6 +118,29 @@ export default function EquipesListScreen() {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [teamPickerVisible, setTeamPickerVisible] = useState<boolean>(false);
   const [savingAthlete, setSavingAthlete] = useState<boolean>(false);
+
+  // Formulário completo de edição de atleta
+  const [formNomeCompleto, setFormNomeCompleto] = useState<string>('');
+  const [formApelido, setFormApelido] = useState<string>('');
+  const [formTelefone, setFormTelefone] = useState<string>('');
+  const [formEmail, setFormEmail] = useState<string>('');
+  const [birthDigits, setBirthDigits] = useState<string>('');
+  const [birthDisplay, setBirthDisplay] = useState<string>('');
+  const [imagemAtleta, setImagemAtleta] = useState<{ uri: string } | null>(null);
+  const [docFrente, setDocFrente] = useState<{ uri: string } | null>(null);
+  const [docVerso, setDocVerso] = useState<{ uri: string } | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{
+    nome?: string;
+    telefone?: string;
+    email?: string;
+    imagem?: string;
+    birthdate?: string;
+  }>({});
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [docPreview, setDocPreview] = useState<{
+    front?: string | null;
+    back?: string | null;
+  } | null>(null);
 
   // aba selecionada (Times / Diretoria)
   const [viewMode, setViewMode] = useState<ViewMode>('times');
@@ -465,54 +492,288 @@ export default function EquipesListScreen() {
 
   // ===================== EDIÇÃO DE ATLETA SEM TIME =====================
 
+  // Funções auxiliares para edição completa
+  function validarEmail(email: string): boolean {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email.trim());
+  }
+
+  function formatBirthDisplay(digits: string): string {
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 4) {
+      return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    }
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+  }
+
+  function handleBirthChange(text: string) {
+    const digits = text.replace(/\D/g, '').slice(0, 8);
+    setBirthDigits(digits);
+    setBirthDisplay(formatBirthDisplay(digits));
+    if (fieldErrors.birthdate) {
+      setFieldErrors(prev => ({ ...prev, birthdate: undefined }));
+    }
+  }
+
+  function getBirthdateForPayload(): string | null {
+    if (birthDigits.length === 0) return null;
+    if (birthDigits.length !== 8) return null;
+    const d = birthDigits.slice(0, 2);
+    const m = birthDigits.slice(2, 4);
+    const y = birthDigits.slice(4, 8);
+    return `${y}-${m}-${d}`; // yyyy-mm-dd
+  }
+
+  async function ensureMediaPermission(): Promise<boolean> {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(
+        'Permissão necessária',
+        'Precisamos de permissão para acessar as fotos do dispositivo.'
+      );
+      return false;
+    }
+    return true;
+  }
+
+  async function pickImage(setImage: (img: { uri: string } | null) => void) {
+    const allowed = await ensureMediaPermission();
+    if (!allowed) return;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.8,
+    });
+
+    if (result.canceled) return;
+
+    const asset = result.assets[0];
+    setImage({ uri: asset.uri });
+  }
+
+  async function uploadImageToStorage(
+    picked: { uri: string },
+    pathPrefix: string
+  ): Promise<string | null> {
+    try {
+      const response = await fetch(picked.uri);
+      const blob = await response.blob();
+
+      const extGuess = picked.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const fileExt = ['jpg', 'jpeg', 'png', 'webp'].includes(extGuess)
+        ? extGuess
+        : 'jpg';
+
+      const filePath = `${pathPrefix}-${Date.now()}.${fileExt}`;
+
+      const { data, error } = await supabase.storage
+        .from('athletes')
+        .upload(filePath, blob, {
+          upsert: true,
+          contentType: blob.type || 'image/jpeg',
+        });
+
+      if (error) {
+        console.error('[EquipesListScreen] Erro upload storage:', error.message);
+        return null;
+      }
+
+      const { data: publicData } = supabase.storage
+        .from('athletes')
+        .getPublicUrl(data.path);
+
+      return publicData.publicUrl ?? null;
+    } catch (err) {
+      console.error('[EquipesListScreen] Erro inesperado upload:', err);
+      return null;
+    }
+  }
+
+  async function uploadEncryptedDocument(
+    picked: { uri: string },
+    pathPrefix: string
+  ): Promise<string | null> {
+    try {
+      const response = await fetch(picked.uri);
+      const originalBlob = await response.blob();
+
+      const originalContentType = originalBlob.type || 'image/jpeg';
+      const encryptedBlob = await encryptImageBlob(originalBlob);
+
+      const extGuess = picked.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const fileExt = ['jpg', 'jpeg', 'png', 'webp'].includes(extGuess)
+        ? extGuess
+        : 'jpg';
+
+      const filePath = `${pathPrefix}-${Date.now()}.${fileExt}.enc`;
+      const blobWithCorrectType = new Blob([encryptedBlob], { type: originalContentType });
+
+      const { data, error } = await supabase.storage
+        .from('athletes')
+        .upload(filePath, blobWithCorrectType, {
+          upsert: true,
+          contentType: originalContentType,
+        });
+
+      if (error) {
+        console.error('[EquipesListScreen] Erro upload documento criptografado:', error.message);
+        return null;
+      }
+
+      const { data: publicData } = supabase.storage
+        .from('athletes')
+        .getPublicUrl(data.path);
+
+      return publicData.publicUrl ?? null;
+    } catch (err) {
+      console.error('[EquipesListScreen] Erro inesperado upload documento:', err);
+      return null;
+    }
+  }
+
+  function validarCampos(): boolean {
+    const errors: typeof fieldErrors = {};
+
+    if (!formNomeCompleto.trim()) {
+      errors.nome = 'Informe o nome completo do atleta.';
+    }
+    if (!formTelefone.trim()) {
+      errors.telefone = 'Informe um telefone de contato.';
+    }
+    if (!formEmail.trim()) {
+      errors.email = 'Informe um e-mail válido.';
+    } else if (!validarEmail(formEmail)) {
+      errors.email = 'Informe um e-mail válido (exemplo: email@exemplo.com).';
+    }
+
+    if (!imagemAtleta && !editingAthlete?.image_url) {
+      errors.imagem = 'Selecione a imagem do atleta.';
+    }
+
+    if (birthDigits.length > 0 && birthDigits.length < 8) {
+      errors.birthdate =
+        'Complete a data de nascimento (dd/mm/aaaa) ou deixe em branco.';
+    }
+
+    setFieldErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      Alert.alert(
+        'Campos obrigatórios',
+        'Preencha corretamente os campos destacados em vermelho.'
+      );
+      return false;
+    }
+    return true;
+  }
+
   function openAthleteEditModal(athlete: AthleteWithoutTeam) {
     setEditingAthlete(athlete);
     setSelectedTeamId(athlete.team_id || null);
+    
+    // Preencher formulário com dados do atleta
+    setFormNomeCompleto(athlete.full_name);
+    setFormApelido(athlete.nickname ?? '');
+    setFormTelefone(athlete.phone ?? '');
+    setFormEmail(athlete.email ?? '');
+
+    if (athlete.birthdate) {
+      const [y, m, d] = athlete.birthdate.split('-');
+      const digits = `${d}${m}${y}`;
+      setBirthDigits(digits);
+      setBirthDisplay(formatBirthDisplay(digits));
+    } else {
+      setBirthDigits('');
+      setBirthDisplay('');
+    }
+
+    setImagemAtleta(null);
+    setDocFrente(null);
+    setDocVerso(null);
+    setFieldErrors({});
     setAthleteEditModalVisible(true);
   }
 
   async function handleSaveAthleteTeam() {
     if (!editingAthlete) return;
-    if (!selectedTeamId) {
-      Alert.alert('Atenção', 'Selecione um time para vincular o atleta.');
-      return;
-    }
+    
+    if (!validarCampos()) return;
 
     setSavingAthlete(true);
 
     try {
-      // Buscar category_id do time selecionado
-      const { data: teamData, error: teamError } = await supabase
-        .from('teams')
-        .select('category_id')
-        .eq('id', selectedTeamId)
-        .single();
+      const athleteId = editingAthlete.id;
+      const birthdateDb = getBirthdateForPayload();
 
-      if (teamError) {
-        console.error(
-          '[EquipesListScreen] Erro ao buscar categoria do time:',
-          teamError.message
-        );
-        Alert.alert('Erro', 'Não foi possível buscar a categoria do time.');
-        setSavingAthlete(false);
-        return;
+      // Upload de imagens
+      const [imageUrl, docFrontUrl, docBackUrl] = await Promise.all([
+        imagemAtleta
+          ? uploadImageToStorage(imagemAtleta, `${athleteId}-photo`)
+          : Promise.resolve(null),
+        docFrente
+          ? uploadEncryptedDocument(docFrente, `${athleteId}-doc-front`)
+          : Promise.resolve(null),
+        docVerso
+          ? uploadEncryptedDocument(docVerso, `${athleteId}-doc-back`)
+          : Promise.resolve(null),
+      ]);
+
+      // Preparar payload de atualização
+      const updatePayload: any = {
+        full_name: formNomeCompleto.trim(),
+        nickname: formApelido.trim() || null,
+        phone: formTelefone.trim(),
+        email: formEmail.trim(),
+        birthdate: birthdateDb,
+      };
+
+      // Se houver nova imagem, usar ela. Caso contrário, manter a existente
+      if (imageUrl) {
+        updatePayload.image_url = imageUrl;
+      } else if (editingAthlete.image_url) {
+        updatePayload.image_url = editingAthlete.image_url;
       }
 
-      // Atualizar atleta com team_id e category_id
+      if (docFrontUrl) updatePayload.document_front_url = docFrontUrl;
+      if (docBackUrl) updatePayload.document_back_url = docBackUrl;
+
+      // Se um time foi selecionado, vincular o atleta
+      if (selectedTeamId) {
+        const { data: teamData, error: teamError } = await supabase
+          .from('teams')
+          .select('category_id')
+          .eq('id', selectedTeamId)
+          .single();
+
+        if (teamError) {
+          console.error(
+            '[EquipesListScreen] Erro ao buscar categoria do time:',
+            teamError.message
+          );
+          // Continua mesmo se não conseguir buscar a categoria
+        }
+
+        updatePayload.team_id = selectedTeamId;
+        updatePayload.category_id = teamData?.category_id || null;
+      } else {
+        // Se nenhum time foi selecionado, manter sem time
+        updatePayload.team_id = null;
+        updatePayload.category_id = null;
+      }
+
+      // Atualizar atleta
       const { error: updateError } = await supabase
         .from('athletes')
-        .update({
-          team_id: selectedTeamId,
-          category_id: teamData?.category_id || null,
-        })
-        .eq('id', editingAthlete.id);
+        .update(updatePayload)
+        .eq('id', athleteId);
 
       if (updateError) {
         console.error(
           '[EquipesListScreen] Erro ao atualizar atleta:',
           updateError.message
         );
-        Alert.alert('Erro', 'Não foi possível vincular o atleta ao time.');
+        Alert.alert('Erro', 'Não foi possível salvar as alterações do atleta.');
         setSavingAthlete(false);
         return;
       }
@@ -520,17 +781,27 @@ export default function EquipesListScreen() {
       setAthleteEditModalVisible(false);
       setEditingAthlete(null);
       setSelectedTeamId(null);
+      setFormNomeCompleto('');
+      setFormApelido('');
+      setFormTelefone('');
+      setFormEmail('');
+      setBirthDigits('');
+      setBirthDisplay('');
+      setImagemAtleta(null);
+      setDocFrente(null);
+      setDocVerso(null);
+      setFieldErrors({});
 
       // Recarregar lista de atletas sem time
       await loadAthletesWithoutTeam();
       
-      Alert.alert('Sucesso', 'Atleta vinculado ao time com sucesso!');
+      Alert.alert('Sucesso', 'Atleta atualizado com sucesso!');
     } catch (err) {
       console.error(
         '[EquipesListScreen] Erro inesperado ao atualizar atleta:',
         err
       );
-      Alert.alert('Erro', 'Ocorreu um erro inesperado ao vincular o atleta.');
+      Alert.alert('Erro', 'Ocorreu um erro inesperado ao salvar o atleta.');
     } finally {
       setSavingAthlete(false);
     }
@@ -1039,7 +1310,7 @@ export default function EquipesListScreen() {
         </View>
       </Modal>
 
-      {/* Modal edição de atleta sem time */}
+      {/* Modal edição completa de atleta sem time */}
       <Modal
         visible={athleteEditModalVisible}
         transparent
@@ -1053,87 +1324,316 @@ export default function EquipesListScreen() {
         }}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Vincular atleta a um time</Text>
+          <ScrollView 
+            contentContainerStyle={styles.modalCardScroll}
+            showsVerticalScrollIndicator={true}
+          >
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Editar atleta</Text>
 
-            <Text style={styles.fieldLabel}>Atleta</Text>
-            <Text style={styles.infoValueModal}>
-              {editingAthlete?.full_name || '—'}
-            </Text>
-            {editingAthlete?.nickname && (
-              <Text style={styles.infoValueModalEmail}>
-                Apelido: {editingAthlete.nickname}
+              {/* Nome completo */}
+              <Text style={styles.fieldLabel}>
+                Nome completo <Text style={styles.requiredStar}>*</Text>
               </Text>
-            )}
-
-            <Text style={styles.fieldLabel}>Time</Text>
-            <TouchableOpacity
-              style={styles.input}
-              onPress={() => setTeamPickerVisible(true)}
-            >
-              <Text
+              <TextInput
                 style={[
-                  styles.pickerText,
-                  !selectedTeamId && styles.pickerPlaceholder,
+                  styles.input,
+                  fieldErrors.nome ? styles.inputError : null,
                 ]}
-              >
-                {selectedTeamId
-                  ? equipes.find(t => t.id === selectedTeamId)?.name ||
-                    'Selecione um time'
-                  : 'Selecione um time'}
-              </Text>
-              <Ionicons
-                name="chevron-down-outline"
-                size={20}
-                color={AppTheme.textSecondary}
-                style={{ position: 'absolute', right: 10 }}
-              />
-            </TouchableOpacity>
-
-            {selectedTeamId && (
-              <View style={{ marginTop: 8 }}>
-                {(() => {
-                  const selectedTeam = equipes.find(t => t.id === selectedTeamId);
-                  const category = selectedTeam?.category;
-                  return category ? (
-                    <Text style={styles.cardLineSmall}>
-                      Categoria: {category.name}
-                      {category.age_min !== null || category.age_max !== null
-                        ? ` (${category.age_min || '—'} a ${category.age_max || '—'} anos)`
-                        : ''}
-                    </Text>
-                  ) : null;
-                })()}
-              </View>
-            )}
-
-            <View style={styles.modalButtonsRow}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonOutline]}
-                onPress={() => {
-                  if (!savingAthlete) {
-                    setAthleteEditModalVisible(false);
-                    setEditingAthlete(null);
-                    setSelectedTeamId(null);
+                value={formNomeCompleto}
+                onChangeText={text => {
+                  setFormNomeCompleto(text);
+                  if (fieldErrors.nome) {
+                    setFieldErrors(prev => ({ ...prev, nome: undefined }));
                   }
                 }}
+                placeholder="Nome completo do atleta"
+              />
+              {fieldErrors.nome && (
+                <Text style={styles.errorText}>{fieldErrors.nome}</Text>
+              )}
+
+              {/* Apelido */}
+              <Text style={styles.fieldLabel}>Apelido (opcional)</Text>
+              <TextInput
+                style={styles.input}
+                value={formApelido}
+                onChangeText={setFormApelido}
+                placeholder="Apelido usado no time"
+              />
+
+              {/* Telefone */}
+              <Text style={styles.fieldLabel}>
+                Telefone <Text style={styles.requiredStar}>*</Text>
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  fieldErrors.telefone ? styles.inputError : null,
+                ]}
+                value={formTelefone}
+                onChangeText={text => {
+                  setFormTelefone(text);
+                  if (fieldErrors.telefone) {
+                    setFieldErrors(prev => ({
+                      ...prev,
+                      telefone: undefined,
+                    }));
+                  }
+                }}
+                placeholder="(00) 00000-0000"
+                keyboardType="phone-pad"
+              />
+              {fieldErrors.telefone && (
+                <Text style={styles.errorText}>{fieldErrors.telefone}</Text>
+              )}
+
+              {/* Data de nascimento */}
+              <Text style={styles.fieldLabel}>
+                Data de nascimento (opcional, dd/mm/aaaa)
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  fieldErrors.birthdate ? styles.inputError : null,
+                ]}
+                value={birthDisplay}
+                onChangeText={handleBirthChange}
+                placeholder="__/__/____"
+                keyboardType="number-pad"
+              />
+              {fieldErrors.birthdate && (
+                <Text style={styles.errorText}>{fieldErrors.birthdate}</Text>
+              )}
+
+              {/* E-mail */}
+              <Text style={styles.fieldLabel}>
+                E-mail <Text style={styles.requiredStar}>*</Text>
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  fieldErrors.email ? styles.inputError : null,
+                ]}
+                value={formEmail}
+                onChangeText={text => {
+                  setFormEmail(text);
+                  if (fieldErrors.email) {
+                    setFieldErrors(prev => ({
+                      ...prev,
+                      email: undefined,
+                    }));
+                  }
+                }}
+                placeholder="email@exemplo.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              {fieldErrors.email && (
+                <Text style={styles.errorText}>{fieldErrors.email}</Text>
+              )}
+
+              {/* Imagem do atleta */}
+              <Text style={styles.fieldLabel}>
+                Imagem do atleta <Text style={styles.requiredStar}>*</Text>
+              </Text>
+              <View style={styles.imageRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.imageButton,
+                    fieldErrors.imagem ? styles.inputError : null,
+                  ]}
+                  onPress={() => pickImage(setImagemAtleta)}
+                  disabled={savingAthlete}
+                >
+                  <Ionicons
+                    name="image-outline"
+                    size={18}
+                    color={AppTheme.primary}
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.imageButtonText}>Escolher imagem</Text>
+                </TouchableOpacity>
+
+                {imagemAtleta ? (
+                  <Image
+                    source={{ uri: imagemAtleta.uri }}
+                    style={styles.imagePreview}
+                  />
+                ) : editingAthlete?.image_url ? (
+                  <Image
+                    source={{ uri: editingAthlete.image_url }}
+                    style={styles.imagePreview}
+                  />
+                ) : null}
+              </View>
+              {fieldErrors.imagem && (
+                <Text style={styles.errorText}>{fieldErrors.imagem}</Text>
+              )}
+
+              {/* Documento frente */}
+              <Text style={styles.fieldLabel}>
+                Documento frente (opcional)
+              </Text>
+              <View style={styles.imageRow}>
+                <TouchableOpacity
+                  style={styles.imageButton}
+                  onPress={() => pickImage(setDocFrente)}
+                >
+                  <Ionicons
+                    name="document-text-outline"
+                    size={18}
+                    color={AppTheme.primary}
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.imageButtonText}>
+                    {docFrente ? 'Trocar documento' : 'Escolher documento'}
+                  </Text>
+                </TouchableOpacity>
+
+                {docFrente && (
+                  <TouchableOpacity
+                    onPress={() => setDocFrente(null)}
+                    style={{ marginLeft: 8 }}
+                  >
+                    <Ionicons
+                      name="close-circle-outline"
+                      size={24}
+                      color="#D32F2F"
+                    />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {docFrente && (
+                <Image
+                  source={{ uri: docFrente.uri }}
+                  style={styles.imagePreview}
+                />
+              )}
+
+              {/* Documento verso */}
+              <Text style={styles.fieldLabel}>
+                Documento verso (opcional)
+              </Text>
+              <View style={styles.imageRow}>
+                <TouchableOpacity
+                  style={styles.imageButton}
+                  onPress={() => pickImage(setDocVerso)}
+                >
+                  <Ionicons
+                    name="document-text-outline"
+                    size={18}
+                    color={AppTheme.primary}
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.imageButtonText}>
+                    {docVerso ? 'Trocar documento' : 'Escolher documento'}
+                  </Text>
+                </TouchableOpacity>
+
+                {docVerso && (
+                  <TouchableOpacity
+                    onPress={() => setDocVerso(null)}
+                    style={{ marginLeft: 8 }}
+                  >
+                    <Ionicons
+                      name="close-circle-outline"
+                      size={24}
+                      color="#D32F2F"
+                    />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {docVerso && (
+                <Image
+                  source={{ uri: docVerso.uri }}
+                  style={styles.imagePreview}
+                />
+              )}
+
+              {/* Time */}
+              <Text style={styles.fieldLabel}>Time (opcional)</Text>
+              <TouchableOpacity
+                style={styles.input}
+                onPress={() => setTeamPickerVisible(true)}
               >
-                <Text style={styles.modalButtonOutlineText}>Cancelar</Text>
+                <Text
+                  style={[
+                    styles.pickerText,
+                    !selectedTeamId && styles.pickerPlaceholder,
+                  ]}
+                >
+                  {selectedTeamId
+                    ? equipes.find(t => t.id === selectedTeamId)?.name ||
+                      'Selecione um time'
+                    : 'Nenhum time (sem time)'}
+                </Text>
+                <Ionicons
+                  name="chevron-down-outline"
+                  size={20}
+                  color={AppTheme.textSecondary}
+                  style={{ position: 'absolute', right: 10 }}
+                />
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonPrimary]}
-                onPress={handleSaveAthleteTeam}
-                disabled={savingAthlete || !selectedTeamId}
-              >
-                {savingAthlete ? (
-                  <ActivityIndicator color="#FFF" />
-                ) : (
-                  <Text style={styles.modalButtonPrimaryText}>Salvar</Text>
-                )}
-              </TouchableOpacity>
+              {selectedTeamId && (
+                <View style={{ marginTop: 8 }}>
+                  {(() => {
+                    const selectedTeam = equipes.find(t => t.id === selectedTeamId);
+                    const category = selectedTeam?.category;
+                    return category ? (
+                      <Text style={styles.cardLineSmall}>
+                        Categoria: {category.name}
+                        {category.age_min !== null || category.age_max !== null
+                          ? ` (${category.age_min || '—'} a ${category.age_max || '—'} anos)`
+                          : ''}
+                      </Text>
+                    ) : null;
+                  })()}
+                </View>
+              )}
+
+              {/* Botões */}
+              <View style={styles.modalButtonsRow}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonOutline]}
+                  onPress={() => {
+                    if (!savingAthlete) {
+                      setAthleteEditModalVisible(false);
+                      setEditingAthlete(null);
+                      setSelectedTeamId(null);
+                      setFormNomeCompleto('');
+                      setFormApelido('');
+                      setFormTelefone('');
+                      setFormEmail('');
+                      setBirthDigits('');
+                      setBirthDisplay('');
+                      setImagemAtleta(null);
+                      setDocFrente(null);
+                      setDocVerso(null);
+                      setFieldErrors({});
+                    }
+                  }}
+                >
+                  <Text style={styles.modalButtonOutlineText}>Cancelar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonPrimary]}
+                  onPress={handleSaveAthleteTeam}
+                  disabled={savingAthlete}
+                >
+                  {savingAthlete ? (
+                    <ActivityIndicator color="#FFF" />
+                  ) : (
+                    <Text style={styles.modalButtonPrimaryText}>Salvar</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
 
@@ -1538,6 +2038,50 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: AppTheme.border,
+  },
+  modalCardScroll: {
+    padding: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: '100%',
+  },
+  requiredStar: {
+    color: '#D32F2F',
+    fontWeight: '700',
+  },
+  inputError: {
+    borderColor: '#D32F2F',
+  },
+  errorText: {
+    fontSize: 11,
+    color: '#D32F2F',
+    marginTop: 2,
+  },
+  imageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  imageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+    backgroundColor: '#FFFFFF',
+  },
+  imageButtonText: {
+    fontSize: 13,
+    color: AppTheme.primary,
+    fontWeight: '600',
+  },
+  imagePreview: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginLeft: 10,
   },
   modalTitle: {
     fontSize: 18,
