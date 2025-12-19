@@ -708,39 +708,104 @@ export default function EquipeAtletasScreen({ route }: Props) {
   }
 
   async function handleDeleteAthlete(atleta: Athlete) {
+    console.log('[EquipeAtletasScreen] handleDeleteAthlete chamado para:', atleta.full_name);
+    
+    // Verificar se está no ambiente web e usar window.confirm como fallback
+    const isWeb = typeof window !== 'undefined' && window.confirm;
+    
+    if (isWeb) {
+      const confirmed = window.confirm(
+        `Deseja realmente remover o atleta "${atleta.full_name}" desta equipe? O atleta ficará sem time e poderá ser vinculado a outro time posteriormente.`
+      );
+      
+      if (!confirmed) {
+        console.log('[EquipeAtletasScreen] Remoção cancelada pelo usuário');
+        return;
+      }
+      
+      // Se confirmado, proceder com a remoção
+      console.log('[EquipeAtletasScreen] Confirmado remoção do atleta:', atleta.id);
+      try {
+        const { error } = await supabase
+          .from('athletes')
+          .update({
+            team_id: null,
+            category_id: null,
+          })
+          .eq('id', atleta.id);
+
+        if (error) {
+          console.error(
+            '[EquipeAtletasScreen] Erro remover atleta da equipe:',
+            error.message
+          );
+          Alert.alert('Erro', 'Não foi possível remover o atleta da equipe.');
+          return;
+        }
+
+        // Fechar o modal se estiver aberto
+        setModalVisible(false);
+        setEditingAthlete(null);
+
+        await carregarAtletas();
+        Alert.alert('Sucesso', 'Atleta removido da equipe com sucesso. Ele agora está sem time.');
+      } catch (err) {
+        console.error(
+          '[EquipeAtletasScreen] Erro inesperado remover atleta da equipe:',
+          err
+        );
+        Alert.alert(
+          'Erro',
+          'Ocorreu um erro inesperado ao remover o atleta da equipe.'
+        );
+      }
+      return;
+    }
+    
+    // Para mobile, usar Alert.alert normalmente
     Alert.alert(
-      'Remover atleta',
-      `Deseja realmente excluir o atleta "${atleta.full_name}" desta equipe?`,
+      'Remover atleta da equipe',
+      `Deseja realmente remover o atleta "${atleta.full_name}" desta equipe? O atleta ficará sem time e poderá ser vinculado a outro time posteriormente.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
-          text: 'Excluir',
+          text: 'Remover',
           style: 'destructive',
           onPress: async () => {
+            console.log('[EquipeAtletasScreen] Confirmado remoção do atleta:', atleta.id);
             try {
+              // Remover o vínculo com o time, definindo team_id e category_id como null
               const { error } = await supabase
                 .from('athletes')
-                .delete()
+                .update({
+                  team_id: null,
+                  category_id: null,
+                })
                 .eq('id', atleta.id);
 
               if (error) {
                 console.error(
-                  '[EquipeAtletasScreen] Erro excluir atleta:',
+                  '[EquipeAtletasScreen] Erro remover atleta da equipe:',
                   error.message
                 );
-                Alert.alert('Erro', 'Não foi possível excluir o atleta.');
+                Alert.alert('Erro', 'Não foi possível remover o atleta da equipe.');
                 return;
               }
 
+              // Fechar o modal se estiver aberto
+              setModalVisible(false);
+              setEditingAthlete(null);
+
               await carregarAtletas();
+              Alert.alert('Sucesso', 'Atleta removido da equipe com sucesso. Ele agora está sem time.');
             } catch (err) {
               console.error(
-                '[EquipeAtletasScreen] Erro inesperado excluir atleta:',
+                '[EquipeAtletasScreen] Erro inesperado remover atleta da equipe:',
                 err
               );
               Alert.alert(
                 'Erro',
-                'Ocorreu um erro inesperado ao excluir o atleta.'
+                'Ocorreu um erro inesperado ao remover o atleta da equipe.'
               );
             }
           },
@@ -883,7 +948,18 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
               <TouchableOpacity
                 style={styles.iconButton}
-                onPress={() => handleDeleteAthlete(item)}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  console.log('[EquipeAtletasScreen] Botão excluir clicado para:', item.full_name, item.id);
+                  try {
+                    handleDeleteAthlete(item);
+                  } catch (error) {
+                    console.error('[EquipeAtletasScreen] Erro ao chamar handleDeleteAthlete:', error);
+                    Alert.alert('Erro', 'Não foi possível processar a ação. Verifique o console.');
+                  }
+                }}
+                activeOpacity={0.7}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Ionicons name="trash-outline" size={18} color="#C62828" />
               </TouchableOpacity>
@@ -1188,30 +1264,48 @@ export default function EquipeAtletasScreen({ route }: Props) {
             )}
 
             {/* Botões */}
-            <View style={styles.modalButtonsRow}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonOutline]}
-                onPress={() => {
-                  if (!saving) {
-                    setModalVisible(false);
-                    setEditingAthlete(null);
-                  }
-                }}
-              >
-                <Text style={styles.modalButtonOutlineText}>Cancelar</Text>
-              </TouchableOpacity>
+            <View style={[styles.modalButtonsRow, editingAthlete && styles.modalButtonsRowWithDelete]}>
+              {/* Botão Excluir - apenas quando está editando */}
+              {editingAthlete && (
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonDanger]}
+                  onPress={() => {
+                    if (!saving && editingAthlete) {
+                      handleDeleteAthlete(editingAthlete);
+                    }
+                  }}
+                  disabled={saving}
+                >
+                  <Ionicons name="trash-outline" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.modalButtonDangerText}>Excluir</Text>
+                </TouchableOpacity>
+              )}
 
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonPrimary]}
-                onPress={handleSalvarAtleta}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator color="#FFF" />
-                ) : (
-                  <Text style={styles.modalButtonPrimaryText}>Salvar</Text>
-                )}
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row' }}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonOutline]}
+                  onPress={() => {
+                    if (!saving) {
+                      setModalVisible(false);
+                      setEditingAthlete(null);
+                    }
+                  }}
+                >
+                  <Text style={styles.modalButtonOutlineText}>Cancelar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonPrimary]}
+                  onPress={handleSalvarAtleta}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator color="#FFF" />
+                  ) : (
+                    <Text style={styles.modalButtonPrimaryText}>Salvar</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </View>
@@ -1446,8 +1540,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   iconButton: {
-    paddingHorizontal: 6,
-    paddingVertical: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    minWidth: 32,
+    minHeight: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   avatar: {
     width: 40,
@@ -1570,6 +1668,9 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     marginTop: 16,
   },
+  modalButtonsRowWithDelete: {
+    justifyContent: 'space-between',
+  },
   modalButton: {
     paddingVertical: 10,
     paddingHorizontal: 14,
@@ -1589,6 +1690,16 @@ const styles = StyleSheet.create({
     backgroundColor: AppTheme.primary,
   },
   modalButtonPrimaryText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  modalButtonDanger: {
+    backgroundColor: '#C62828',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  modalButtonDangerText: {
     fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
