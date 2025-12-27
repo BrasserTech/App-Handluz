@@ -24,6 +24,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage'; // IMPORT NOVO
 
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
@@ -79,6 +80,9 @@ type Athlete = {
 };
 
 type AttendanceStatus = 'present' | 'absent' | 'justified';
+
+// Constante para o Storage
+const STORAGE_TEAM_KEY = '@handluz:selectedTeamId';
 
 // --- HELPER FUNCTIONS ---
 
@@ -219,7 +223,18 @@ export default function TreinosListScreen() {
     });
   }
 
-  // ================== CARREGAR DADOS ==================
+  // ================== GERENCIAMENTO DE EQUIPES E CACHE ==================
+
+  // Função auxiliar para mudar equipe e salvar no cache
+  const handleTeamChange = async (teamId: string) => {
+    setSelectedTeamId(teamId);
+    setSelectedDate(null);
+    try {
+      await AsyncStorage.setItem(STORAGE_TEAM_KEY, teamId);
+    } catch (e) {
+      console.warn('Erro ao salvar equipe no cache:', e);
+    }
+  };
 
   const loadTeams = useCallback(async () => {
     setTeamsLoading(true);
@@ -228,7 +243,24 @@ export default function TreinosListScreen() {
       if (error) throw error;
       const list = (data ?? []) as Team[];
       setTeams(list);
-      if (!selectedTeamId && list.length > 0) setSelectedTeamId(list[0].id);
+
+      // Lógica de Cache: Tenta carregar a última equipe usada
+      if (list.length > 0) {
+        // Se já temos uma selecionada (ex: via props), mantemos. Se não, buscamos do cache.
+        if (!selectedTeamId) {
+            try {
+                const cachedId = await AsyncStorage.getItem(STORAGE_TEAM_KEY);
+                if (cachedId && list.some(t => t.id === cachedId)) {
+                    setSelectedTeamId(cachedId);
+                } else {
+                    // Fallback para a primeira equipe
+                    setSelectedTeamId(list[0].id);
+                }
+            } catch {
+                setSelectedTeamId(list[0].id);
+            }
+        }
+      }
     } catch (err) {
       console.error('[Treinos] Erro teams:', err);
     } finally {
@@ -237,6 +269,8 @@ export default function TreinosListScreen() {
   }, [selectedTeamId]);
 
   useEffect(() => { loadTeams(); }, [loadTeams]);
+
+  // ================== CARREGAR TREINOS ==================
 
   const loadTrainings = useCallback(async () => {
     if (!selectedTeamId) return;
@@ -307,7 +341,6 @@ export default function TreinosListScreen() {
     setIsSavingAttendance(false);
 
     try {
-      // 1. Busca atletas
       const { data: athletesData, error: athletesError } = await supabase
         .from('athletes')
         .select('*') 
@@ -315,14 +348,12 @@ export default function TreinosListScreen() {
 
       if (athletesError) throw athletesError;
 
-      // Ordenar por nome
       const sortedAthletes = (athletesData || []).sort((a: any, b: any) => {
          const nameA = a.name || a.full_name || '';
          const nameB = b.name || b.full_name || '';
          return nameA.localeCompare(nameB);
       });
 
-      // 2. Busca presenças
       const { data: attendanceData, error: attError } = await supabase
         .from('training_attendance')
         .select('athlete_id, status, justification')
@@ -401,7 +432,7 @@ export default function TreinosListScreen() {
     }
   }
 
-  // ================== LÓGICA DE CALENDÁRIO & MODAIS ORIGINAIS ==================
+  // ================== CALENDÁRIO ==================
 
   const calendarDays = useMemo(() => {
     const days: { date: Date | null; iso: string | null }[] = [];
@@ -576,7 +607,11 @@ export default function TreinosListScreen() {
           {teamsLoading ? <ActivityIndicator size="small" color={AppTheme.primary} /> : (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.teamChipsRow}>
               {teams.map(team => (
-                <TouchableOpacity key={team.id} style={[styles.teamChip, team.id === selectedTeamId && styles.teamChipSelected]} onPress={() => { setSelectedTeamId(team.id); setSelectedDate(null); }}>
+                <TouchableOpacity 
+                    key={team.id} 
+                    style={[styles.teamChip, team.id === selectedTeamId && styles.teamChipSelected]} 
+                    onPress={() => handleTeamChange(team.id)}
+                >
                   <Text style={[styles.teamChipText, team.id === selectedTeamId && styles.teamChipTextSelected]}>{team.name}</Text>
                 </TouchableOpacity>
               ))}
@@ -596,7 +631,7 @@ export default function TreinosListScreen() {
         {currentVacationsText ? <View style={styles.vacationInfo}><Text style={styles.vacationInfoText}>Férias: {currentVacationsText}</Text></View> : null}
 
         <View style={styles.calendarWrapper}>
-            {/* CORREÇÃO DO ERRO DE CHAVE DUPLICADA AQUI: map((d, i) => key={i}) */}
+            {/* CORREÇÃO CHAVES DUPLICADAS: Usando index como key */}
             <View style={styles.calendarWeekRow}>{['D','S','T','Q','Q','S','S'].map((d, i) => <Text key={i} style={styles.calendarWeekday}>{d}</Text>)}</View>
             <View style={styles.calendarGrid}>
                 {calendarDays.map((cell, i) => {
