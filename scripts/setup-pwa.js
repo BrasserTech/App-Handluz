@@ -147,59 +147,223 @@ const manifest = {
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
 console.log('✅ manifest.json criado');
 
-// Criar service worker básico
-const serviceWorker = `// Service Worker para PWA
-const CACHE_NAME = 'app-handluz-v1';
+// Criar service worker otimizado
+// Gerar versão baseada em timestamp para forçar atualização
+const cacheVersion = `app-handluz-${Date.now()}`;
+const serviceWorker = `// Service Worker otimizado para PWA
+// Versão do cache baseada em timestamp para garantir atualizações
+const CACHE_VERSION = '${cacheVersion}';
+const CACHE_NAME = CACHE_VERSION;
+const STATIC_CACHE_NAME = 'app-handluz-static-v1';
+
+// URLs críticas para cache inicial
 const urlsToCache = [
   '/',
   '/index.html',
-  '/manifest.json',
-  '/icon.png'
+  '/manifest.json'
 ];
+
+// Verificar se uma resposta é válida
+function isValidResponse(response) {
+  if (!response || response.status !== 200) {
+    return false;
+  }
+  
+  // Verificar se não é uma resposta de erro HTML
+  const contentType = response.headers.get('content-type') || '';
+  
+  // Se for uma requisição de JS/CSS, garantir que não seja HTML
+  if (response.url.match(/\\.(js|css|json)$/)) {
+    if (contentType.includes('text/html')) {
+      console.warn('⚠️ Resposta inválida: HTML retornado como JS/CSS:', response.url);
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+// Estratégia Network-First: tenta rede primeiro, cache como fallback
+async function networkFirst(request) {
+  try {
+    const networkResponse = await fetch(request);
+    
+    // Validar resposta da rede
+    if (isValidResponse(networkResponse)) {
+      // Clonar resposta para cache (respostas só podem ser lidas uma vez)
+      const responseClone = networkResponse.clone();
+      
+      // Atualizar cache em background
+      caches.open(CACHE_NAME).then((cache) => {
+        cache.put(request, responseClone);
+      });
+      
+      return networkResponse;
+    } else {
+      // Resposta inválida, tentar cache
+      throw new Error('Resposta inválida da rede');
+    }
+  } catch (error) {
+    console.log('🌐 Rede falhou, tentando cache:', request.url);
+    
+    // Buscar do cache
+    const cachedResponse = await caches.match(request);
+    
+    if (cachedResponse && isValidResponse(cachedResponse)) {
+      return cachedResponse;
+    }
+    
+    // Se cache também falhar, retornar erro
+    throw error;
+  }
+}
+
+// Estratégia Cache-First: tenta cache primeiro, rede como fallback
+async function cacheFirst(request) {
+  const cachedResponse = await caches.match(request);
+  
+  if (cachedResponse && isValidResponse(cachedResponse)) {
+    return cachedResponse;
+  }
+  
+  try {
+    const networkResponse = await fetch(request);
+    
+    if (isValidResponse(networkResponse)) {
+      const responseClone = networkResponse.clone();
+      
+      // Armazenar em cache estático
+      caches.open(STATIC_CACHE_NAME).then((cache) => {
+        cache.put(request, responseClone);
+      });
+      
+      return networkResponse;
+    }
+    
+    throw new Error('Resposta inválida');
+  } catch (error) {
+    console.error('❌ Erro ao buscar recurso:', request.url, error);
+    throw error;
+  }
+}
 
 // Instalar service worker
 self.addEventListener('install', (event) => {
+  console.log('🔧 Service Worker instalando...');
+  
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
-        console.log('Cache aberto');
+        console.log('✅ Cache aberto:', CACHE_NAME);
+        // Cache apenas URLs críticas, sem bloquear instalação
         return cache.addAll(urlsToCache).catch((error) => {
-          console.log('Erro ao adicionar ao cache:', error);
+          console.warn('⚠️ Alguns arquivos não puderam ser cacheados:', error);
           // Continuar mesmo se alguns arquivos falharem
         });
       })
+      .then(() => {
+        console.log('✅ Service Worker instalado');
+        // Forçar ativação imediata para aplicar atualizações
+        return self.skipWaiting();
+      })
   );
-  // Forçar ativação imediata
-  self.skipWaiting();
 });
 
 // Ativar service worker
 self.addEventListener('activate', (event) => {
+  console.log('🔄 Service Worker ativando...');
+  
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log('Removendo cache antigo:', cacheName);
-            return caches.delete(cacheName);
-          }
-        })
-      );
+    Promise.all([
+      // Limpar caches antigos
+      caches.keys().then((cacheNames) => {
+        return Promise.all(
+          cacheNames.map((cacheName) => {
+            // Manter apenas o cache atual e o cache estático
+            if (cacheName !== CACHE_NAME && cacheName !== STATIC_CACHE_NAME) {
+              console.log('🗑️ Removendo cache antigo:', cacheName);
+              return caches.delete(cacheName);
+            }
+          })
+        );
+      }),
+      // Tomar controle de todas as páginas imediatamente
+      clients.claim()
+    ]).then(() => {
+      console.log('✅ Service Worker ativado');
+      
+      // Notificar clientes sobre atualização
+      return clients.matchAll().then((clientList) => {
+        clientList.forEach((client) => {
+          client.postMessage({
+            type: 'SW_ACTIVATED',
+            cacheVersion: CACHE_VERSION
+          });
+        });
+      });
     })
   );
-  // Tomar controle de todas as páginas imediatamente
-  event.waitUntil(clients.claim());
 });
 
 // Interceptar requisições
 self.addEventListener('fetch', (event) => {
-  event.respondWith(
-    caches.match(event.request)
-      .then((response) => {
-        // Retornar do cache ou buscar da rede
-        return response || fetch(event.request);
-      })
-  );
+  const { request } = event;
+  const url = new URL(request.url);
+  
+  // Ignorar requisições não-GET
+  if (request.method !== 'GET') {
+    return;
+  }
+  
+  // Ignorar requisições de extensões do navegador
+  if (url.protocol === 'chrome-extension:' || url.protocol === 'moz-extension:') {
+    return;
+  }
+  
+  // Network-First para HTML, JS, CSS e JSON (arquivos que mudam frequentemente)
+  if (
+    request.destination === 'document' ||
+    request.destination === 'script' ||
+    request.destination === 'style' ||
+    url.pathname.match(/\\.(js|css|json)$/) ||
+    url.pathname === '/' ||
+    url.pathname === '/index.html'
+  ) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+  
+  // Cache-First para assets estáticos (imagens, fontes, etc)
+  if (
+    request.destination === 'image' ||
+    request.destination === 'font' ||
+    request.destination === 'audio' ||
+    request.destination === 'video' ||
+    url.pathname.match(/\\.(png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot|mp3|mp4|webm)$/)
+  ) {
+    event.respondWith(cacheFirst(request));
+    return;
+  }
+  
+  // Network-First como padrão para outros recursos
+  event.respondWith(networkFirst(request));
+});
+
+// Escutar mensagens do cliente
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+  
+  if (event.data && event.data.type === 'CLEAR_CACHE') {
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => caches.delete(cacheName))
+      );
+    }).then(() => {
+      event.ports[0].postMessage({ success: true });
+    });
+  }
 });
 `;
 
@@ -221,78 +385,144 @@ if (!html.includes('manifest.json')) {
 if (!html.includes('service-worker')) {
   // Adicionar registro do service worker antes do fechamento do </body>
   const swScript = `  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
-          .then((registration) => {
-            console.log('Service Worker registrado:', registration.scope);
-            // Verificar atualizações
-            registration.update();
+    (function() {
+      if (!('serviceWorker' in navigator)) {
+        console.warn('⚠️ Service Worker não suportado neste navegador');
+        return;
+      }
+
+      let registration = null;
+      let isUpdating = false;
+      let updateCheckInterval = null;
+
+      // Função para registrar Service Worker
+      function registerServiceWorker() {
+        return navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+          .then((reg) => {
+            registration = reg;
+            console.log('✅ Service Worker registrado:', reg.scope);
+            
+            // Verificar se está ativo
+            if (reg.active) {
+              console.log('✅ Service Worker está ativo');
+            }
+            
+            // Escutar atualizações
+            setupUpdateListeners(reg);
+            
+            // Verificar atualizações periodicamente (a cada 5 minutos)
+            updateCheckInterval = setInterval(() => {
+              if (reg) {
+                reg.update();
+              }
+            }, 5 * 60 * 1000);
+            
+            return reg;
           })
           .catch((error) => {
-            console.error('Erro ao registrar Service Worker:', error);
+            console.error('❌ Erro ao registrar Service Worker:', error);
           });
-      });
-      
-      // Registrar imediatamente
-      navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
-        .then((registration) => {
-          console.log('✅ Service Worker registrado:', registration.scope);
+      }
+
+      // Configurar listeners para atualizações
+      function setupUpdateListeners(reg) {
+        // Detectar quando um novo Service Worker está esperando
+        reg.addEventListener('updatefound', () => {
+          const newWorker = reg.installing;
           
-          // Verificar se está ativo
-          if (registration.active) {
-            console.log('✅ Service Worker está ativo');
+          if (!newWorker) return;
+          
+          console.log('🔄 Nova versão do Service Worker detectada');
+          isUpdating = true;
+          
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed') {
+              if (navigator.serviceWorker.controller) {
+                // Há uma nova versão disponível
+                console.log('🔄 Nova versão disponível! Atualizando...');
+                
+                // Notificar o novo worker para pular a espera
+                newWorker.postMessage({ type: 'SKIP_WAITING' });
+                
+                // Aguardar ativação e recarregar
+                newWorker.addEventListener('statechange', () => {
+                  if (newWorker.state === 'activated') {
+                    console.log('✅ Nova versão ativada! Recarregando página...');
+                    // Limpar cache do navegador e recarregar
+                    window.location.reload();
+                  }
+                });
+              } else {
+                // Primeira instalação
+                console.log('✅ Service Worker instalado pela primeira vez');
+                isUpdating = false;
+              }
+            }
+          });
+        });
+        
+        // Detectar quando o Service Worker assume controle
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          console.log('🔄 Service Worker assumiu controle');
+          if (isUpdating) {
+            console.log('🔄 Recarregando para aplicar atualização...');
+            window.location.reload();
           }
-          
+        });
+      }
+
+      // Escutar mensagens do Service Worker
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'SW_ACTIVATED') {
+          console.log('🔄 Service Worker ativado, versão:', event.data.cacheVersion);
+          // Recarregar se necessário
+          if (isUpdating) {
+            window.location.reload();
+          }
+        }
+      });
+
+      // Registrar imediatamente
+      registerServiceWorker();
+
+      // Também registrar quando a página carregar (backup)
+      window.addEventListener('load', () => {
+        if (!registration) {
+          registerServiceWorker();
+        } else {
           // Verificar atualizações
           registration.update();
-          
-          // Aguardar um pouco e verificar novamente
-          setTimeout(() => {
-            registration.update();
-            if (registration.active) {
-              console.log('✅ Service Worker confirmado ativo');
-            }
-          }, 1000);
-        })
-        .catch((error) => {
-          console.error('❌ Erro ao registrar Service Worker:', error);
-        });
-      
-    } else {
-      console.warn('⚠️ Service Worker não suportado neste navegador');
-    }
-
-    // Verificar se PWA pode ser instalado
-    let deferredPrompt;
-    window.addEventListener('beforeinstallprompt', (e) => {
-      console.log('✅ PWA pode ser instalado!');
-      console.log('Evento beforeinstallprompt capturado');
-      deferredPrompt = e;
-      // NÃO prevenir o comportamento padrão - deixar o navegador mostrar o prompt
-      // e.preventDefault(); // REMOVIDO para permitir instalação automática
-    });
-
-    // Verificar se já está instalado
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-      console.log('✅ App já está instalado como PWA!');
-    }
-    
-    // Verificar critérios de instalação
-    window.addEventListener('load', () => {
-      setTimeout(() => {
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.getRegistration().then(registration => {
-            if (registration && registration.active) {
-              console.log('✅ Service Worker está ativo');
-              console.log('✅ PWA deve estar pronto para instalação');
-            } else {
-              console.warn('⚠️ Service Worker não está ativo');
-            }
-          });
         }
-      }, 2000);
-    });
+      });
+
+      // Verificar atualizações quando a página ganha foco
+      window.addEventListener('focus', () => {
+        if (registration) {
+          registration.update();
+        }
+      });
+
+      // Verificar se PWA pode ser instalado
+      let deferredPrompt;
+      window.addEventListener('beforeinstallprompt', (e) => {
+        console.log('✅ PWA pode ser instalado!');
+        console.log('Evento beforeinstallprompt capturado');
+        deferredPrompt = e;
+        // NÃO prevenir o comportamento padrão - deixar o navegador mostrar o prompt
+      });
+
+      // Verificar se já está instalado
+      if (window.matchMedia('(display-mode: standalone)').matches) {
+        console.log('✅ App já está instalado como PWA!');
+      }
+      
+      // Limpar intervalo ao sair da página
+      window.addEventListener('beforeunload', () => {
+        if (updateCheckInterval) {
+          clearInterval(updateCheckInterval);
+        }
+      });
+    })();
   </script>
 `;
   html = html.replace('</body>', swScript + '</body>');
