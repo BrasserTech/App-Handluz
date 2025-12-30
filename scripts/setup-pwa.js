@@ -163,24 +163,51 @@ const urlsToCache = [
   '/manifest.json'
 ];
 
+// Verificar se é um domínio externo que não deve ser interceptado
+function isExternalDomain(url) {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname;
+    
+    // Lista de domínios externos que não devem ser interceptados
+    const externalDomains = [
+      'fonts.googleapis.com',
+      'fonts.gstatic.com',
+      'supabase.co',
+      'wikimedia.org',
+      'googleapis.com',
+      'google.com'
+    ];
+    
+    return externalDomains.some(domain => hostname.includes(domain));
+  } catch (e) {
+    return false;
+  }
+}
+
 // Verificar se uma resposta é válida
 function isValidResponse(response) {
-  if (!response || response.status !== 200) {
+  if (!response) {
     return false;
   }
   
-  // Verificar se não é uma resposta de erro HTML
-  const contentType = response.headers.get('content-type') || '';
-  
-  // Se for uma requisição de JS/CSS, garantir que não seja HTML
-  if (response.url.match(/\\.(js|css|json)$/)) {
-    if (contentType.includes('text/html')) {
-      console.warn('⚠️ Resposta inválida: HTML retornado como JS/CSS:', response.url);
-      return false;
+  // Aceitar qualquer resposta com status 200-299
+  if (response.status >= 200 && response.status < 300) {
+    // Verificar se não é uma resposta de erro HTML para JS/CSS
+    const contentType = response.headers.get('content-type') || '';
+    
+    // Se for uma requisição de JS/CSS/JSON, garantir que não seja HTML
+    if (response.url.match(/\\.(js|css|json)$/)) {
+      if (contentType.includes('text/html')) {
+        console.warn('⚠️ Resposta inválida: HTML retornado como JS/CSS:', response.url);
+        return false;
+      }
     }
+    
+    return true;
   }
   
-  return true;
+  return false;
 }
 
 // Estratégia Network-First: tenta rede primeiro, cache como fallback
@@ -193,9 +220,13 @@ async function networkFirst(request) {
       // Clonar resposta para cache (respostas só podem ser lidas uma vez)
       const responseClone = networkResponse.clone();
       
-      // Atualizar cache em background
+      // Atualizar cache em background (não bloquear)
       caches.open(CACHE_NAME).then((cache) => {
-        cache.put(request, responseClone);
+        cache.put(request, responseClone).catch(() => {
+          // Ignorar erros de cache silenciosamente
+        });
+      }).catch(() => {
+        // Ignorar erros de cache silenciosamente
       });
       
       return networkResponse;
@@ -204,8 +235,6 @@ async function networkFirst(request) {
       throw new Error('Resposta inválida da rede');
     }
   } catch (error) {
-    console.log('🌐 Rede falhou, tentando cache:', request.url);
-    
     // Buscar do cache
     const cachedResponse = await caches.match(request);
     
@@ -213,8 +242,15 @@ async function networkFirst(request) {
       return cachedResponse;
     }
     
-    // Se cache também falhar, retornar erro
-    throw error;
+    // Se cache também falhar, retornar a resposta da rede mesmo que inválida
+    // ou uma resposta de erro genérica para não quebrar o app
+    try {
+      const fallbackResponse = await fetch(request);
+      return fallbackResponse;
+    } catch (finalError) {
+      // Último recurso: retornar uma resposta vazia para não quebrar
+      return new Response('', { status: 408, statusText: 'Request Timeout' });
+    }
   }
 }
 
@@ -232,18 +268,29 @@ async function cacheFirst(request) {
     if (isValidResponse(networkResponse)) {
       const responseClone = networkResponse.clone();
       
-      // Armazenar em cache estático
+      // Armazenar em cache estático (não bloquear)
       caches.open(STATIC_CACHE_NAME).then((cache) => {
-        cache.put(request, responseClone);
+        cache.put(request, responseClone).catch(() => {
+          // Ignorar erros de cache silenciosamente
+        });
+      }).catch(() => {
+        // Ignorar erros de cache silenciosamente
       });
       
       return networkResponse;
     }
     
-    throw new Error('Resposta inválida');
+    // Se resposta inválida mas existe, retornar mesmo assim
+    return networkResponse;
   } catch (error) {
-    console.error('❌ Erro ao buscar recurso:', request.url, error);
-    throw error;
+    // Se houver cache mesmo que inválido, retornar
+    if (cachedResponse) {
+      return cachedResponse;
+    }
+    
+    // Se não houver cache e rede falhar, retornar resposta de erro
+    // mas não lançar exceção para não quebrar o app
+    return new Response('', { status: 408, statusText: 'Request Timeout' });
   }
 }
 
@@ -308,45 +355,75 @@ self.addEventListener('activate', (event) => {
 // Interceptar requisições
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  const url = new URL(request.url);
   
   // Ignorar requisições não-GET
   if (request.method !== 'GET') {
     return;
   }
   
-  // Ignorar requisições de extensões do navegador
-  if (url.protocol === 'chrome-extension:' || url.protocol === 'moz-extension:') {
+  try {
+    const url = new URL(request.url);
+    
+    // Ignorar requisições de extensões do navegador
+    if (url.protocol === 'chrome-extension:' || url.protocol === 'moz-extension:') {
+      return;
+    }
+    
+    // NÃO interceptar requisições para domínios externos
+    // Deixar o navegador lidar com eles normalmente
+    if (isExternalDomain(request.url)) {
+      return;
+    }
+    
+    // Network-First para HTML, JS, CSS e JSON (arquivos que mudam frequentemente)
+    if (
+      request.destination === 'document' ||
+      request.destination === 'script' ||
+      request.destination === 'style' ||
+      url.pathname.match(/\\.(js|css|json)$/) ||
+      url.pathname === '/' ||
+      url.pathname === '/index.html'
+    ) {
+      event.respondWith(networkFirst(request).catch((error) => {
+        // Se tudo falhar, tentar buscar diretamente da rede sem cache
+        return fetch(request).catch(() => {
+          // Último recurso: resposta vazia
+          return new Response('', { status: 408, statusText: 'Request Timeout' });
+        });
+      }));
+      return;
+    }
+    
+    // Cache-First para assets estáticos (imagens, fontes, etc)
+    if (
+      request.destination === 'image' ||
+      request.destination === 'font' ||
+      request.destination === 'audio' ||
+      request.destination === 'video' ||
+      url.pathname.match(/\\.(png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot|mp3|mp4|webm)$/)
+    ) {
+      event.respondWith(cacheFirst(request).catch((error) => {
+        // Se tudo falhar, tentar buscar diretamente da rede sem cache
+        return fetch(request).catch(() => {
+          // Último recurso: resposta vazia
+          return new Response('', { status: 408, statusText: 'Request Timeout' });
+        });
+      }));
+      return;
+    }
+    
+    // Network-First como padrão para outros recursos
+    event.respondWith(networkFirst(request).catch((error) => {
+      // Se tudo falhar, tentar buscar diretamente da rede sem cache
+      return fetch(request).catch(() => {
+        // Último recurso: resposta vazia
+        return new Response('', { status: 408, statusText: 'Request Timeout' });
+      });
+    }));
+  } catch (error) {
+    // Se houver erro ao processar a URL, deixar o navegador lidar normalmente
     return;
   }
-  
-  // Network-First para HTML, JS, CSS e JSON (arquivos que mudam frequentemente)
-  if (
-    request.destination === 'document' ||
-    request.destination === 'script' ||
-    request.destination === 'style' ||
-    url.pathname.match(/\\.(js|css|json)$/) ||
-    url.pathname === '/' ||
-    url.pathname === '/index.html'
-  ) {
-    event.respondWith(networkFirst(request));
-    return;
-  }
-  
-  // Cache-First para assets estáticos (imagens, fontes, etc)
-  if (
-    request.destination === 'image' ||
-    request.destination === 'font' ||
-    request.destination === 'audio' ||
-    request.destination === 'video' ||
-    url.pathname.match(/\\.(png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot|mp3|mp4|webm)$/)
-  ) {
-    event.respondWith(cacheFirst(request));
-    return;
-  }
-  
-  // Network-First como padrão para outros recursos
-  event.respondWith(networkFirst(request));
 });
 
 // Escutar mensagens do cliente

@@ -50,7 +50,8 @@ export async function fetchInstagramPosts(): Promise<InstagramPost[]> {
   
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    // Aumentar timeout para 60 segundos (Instagram pode demorar para encontrar imagens)
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
     
     const response = await fetch(apiUrl, {
       method: 'GET',
@@ -102,7 +103,7 @@ export async function fetchInstagramPosts(): Promise<InstagramPost[]> {
     console.error(`[Instagram Service] URL tentada: ${apiUrl}`);
     
     if (err.name === 'AbortError') {
-      console.error(`[Instagram Service] ⏰ Timeout: A requisição demorou mais de 10 segundos`);
+      console.error(`[Instagram Service] ⏰ Timeout: A requisição demorou mais de 60 segundos`);
     } else if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
       console.error(`[Instagram Service] 🌐 Erro de rede: Não foi possível conectar ao servidor`);
     } else {

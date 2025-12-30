@@ -770,7 +770,7 @@ async function fetchInstagramPosts(username) {
       
       await page.goto(profileUrl, {
         waitUntil: 'networkidle2',
-        timeout: 30000
+        timeout: 60000 // Aumentado para 60 segundos (Instagram pode demorar para encontrar imagens)
       });
       
       // Aguardar página carregar completamente
@@ -1173,8 +1173,29 @@ function handleRequest(req, res) {
           : post.imageUrl
       }));
       res.end(JSON.stringify({ success: true, posts: postsWithProxy, cached: true }));
+      
+      // Atualizar cache em background (sem bloquear resposta)
+      console.log(`[Instagram API] Iniciando atualização de cache em background...`);
+      fetchInstagramPosts(username).then((result) => {
+        let posts = [];
+        if (Array.isArray(result)) {
+          posts = result;
+        } else if (result && typeof result === 'object') {
+          posts = result.posts || [];
+        }
+        if (posts.length > 0) {
+          setCachedPosts(posts);
+          console.log(`[Instagram API] Cache atualizado em background com ${posts.length} posts`);
+        }
+      }).catch((err) => {
+        console.error(`[Instagram API] Erro ao atualizar cache em background:`, err.message);
+      });
       return;
     }
+    
+    // Se não houver cache, processar normalmente (com timeout aumentado)
+    // O processamento já é assíncrono e não bloqueia outras requisições
+    console.log(`[Instagram API] Processando busca de posts (pode demorar até 60 segundos)...`);
     
     fetchInstagramPosts(username).then((result) => {
       // Result sempre será um objeto com posts/error ou array de posts
