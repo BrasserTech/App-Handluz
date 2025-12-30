@@ -46,10 +46,12 @@ RUN npm ci
 # Verificar se Chromium está instalado
 RUN chromium-browser --version || chromium --version || echo "Verificando Chromium..."
 
-# Copiar código fonte
+# Copiar código fonte (incluindo .env se existir)
 COPY . .
 
 # Compilar o app para web
+# O dotenv será carregado automaticamente pelo script de build se necessário
+# As variáveis do .env estarão disponíveis via process.env durante o build
 RUN npm run web:build
 
 # Expor porta

@@ -1,4 +1,7 @@
 // Servidor simples para servir o build web do app
+// Carregar variáveis de ambiente do arquivo .env
+require('dotenv').config();
+
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
@@ -140,6 +143,38 @@ function serveFile(req, res, filePath) {
     headers['Content-Encoding'] = 'identity';
   }
 
+  // Se for index.html, injetar variáveis de ambiente do Supabase ANTES de enviar headers
+  if (filePath.endsWith('index.html')) {
+    let html = fs.readFileSync(filePath, 'utf8');
+    
+    // Injetar variáveis do Supabase no HTML para o frontend acessar
+    const supabaseConfig = {
+      SUPABASE_URL: process.env.SUPABASE_URL || '',
+      SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || ''
+    };
+    
+    // Adicionar script antes do fechamento do </head> para disponibilizar as variáveis
+    const envScript = `
+  <script>
+    // Variáveis de ambiente injetadas pelo servidor
+    window.__ENV__ = ${JSON.stringify(supabaseConfig)};
+  </script>`;
+    
+    // Injetar antes do </head> ou no início do <body>
+    if (html.includes('</head>')) {
+      html = html.replace('</head>', envScript + '\n</head>');
+    } else if (html.includes('<body>')) {
+      html = html.replace('<body>', '<body>' + envScript);
+    }
+    
+    // Remover Content-Length do header pois o tamanho mudou
+    delete headers['Content-Length'];
+    res.writeHead(200, headers);
+    res.end(html);
+    return;
+  }
+  
+  // Para outros arquivos, enviar headers e arquivo normalmente
   res.writeHead(200, headers);
   
   // Ler arquivo como buffer para garantir integridade

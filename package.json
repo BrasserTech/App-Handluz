@@ -30,6 +30,7 @@
     "@types/crypto-js": "^4.2.2",
     "axios": "^1.7.9",
     "crypto-js": "^4.2.0",
+    "dotenv": "^16.4.5",
     "expo": "~54.0.25",
     "expo-constants": "~18.0.10",
     "expo-document-picker": "~14.0.8",
