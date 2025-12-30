@@ -754,12 +754,21 @@ async function fetchInstagramPosts(username) {
         '--no-zygote',
         '--disable-gpu',
         '--disable-software-rasterizer',
-        '--disable-extensions'
+        '--disable-extensions',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--memory-pressure-off',
+        '--disable-web-security' // Pode ajudar com alguns problemas de carregamento
       ]
     });
     
     try {
       const page = await browser.newPage();
+      
+      // Definir timeout padrão da página para 60 segundos
+      page.setDefaultNavigationTimeout(60000);
+      page.setDefaultTimeout(60000);
       
       // Definir cookies
       await page.setCookie(...cookies);
@@ -768,13 +777,14 @@ async function fetchInstagramPosts(username) {
       const profileUrl = `https://www.instagram.com/${username}/`;
       console.log(`[Instagram Puppeteer] Navegando para: ${profileUrl}`);
       
+      // Usar domcontentloaded em vez de networkidle2 para economizar memória e tempo
       await page.goto(profileUrl, {
-        waitUntil: 'networkidle2',
+        waitUntil: 'domcontentloaded',
         timeout: 60000 // Aumentado para 60 segundos (Instagram pode demorar para encontrar imagens)
       });
       
-      // Aguardar página carregar completamente
-      await delay(3000);
+      // Aguardar página carregar completamente e scripts executarem
+      await delay(5000); // Aumentado para dar mais tempo para o Instagram carregar
       
       // Tentar primeiro via API interna do Instagram (mais confiável quando logado)
       console.log(`[Instagram Puppeteer] Tentando buscar posts via API interna...`);
@@ -821,7 +831,11 @@ async function fetchInstagramPosts(username) {
               });
             
             console.log(`[Instagram Puppeteer] Posts encontrados via API: ${extractedPosts.length}`);
-            await browser.close();
+            try {
+              await browser.close();
+            } catch (closeErr) {
+              console.warn(`[Instagram Puppeteer] Erro ao fechar browser:`, closeErr.message);
+            }
             return extractedPosts;
           } else if (mediaEdge && mediaEdge.count > 0 && (!mediaEdge.edges || mediaEdge.edges.length === 0)) {
             console.log(`[Instagram Puppeteer] API retornou count=${mediaEdge.count} mas edges vazio. Extraindo da página HTML...`);
@@ -944,12 +958,17 @@ async function fetchInstagramPosts(username) {
         });
       }, INSTAGRAM_MAX_POSTS);
       
-      await browser.close();
+      // Fechar browser antes de retornar
+      try {
+        await browser.close();
+      } catch (closeErr) {
+        console.warn(`[Instagram Puppeteer] Erro ao fechar browser:`, closeErr.message);
+      }
       
       if (posts.length > 0) {
         console.log(`[Instagram Puppeteer] Sucesso: ${posts.length} posts encontrados`);
         return posts;
-    } else {
+      } else {
         return {
           posts: [],
           error: 'Nenhum post encontrado no perfil',
@@ -957,7 +976,12 @@ async function fetchInstagramPosts(username) {
         };
       }
     } catch (pageErr) {
-      await browser.close();
+      // Garantir que o browser seja fechado mesmo em caso de erro
+      try {
+        await browser.close();
+      } catch (closeErr) {
+        console.warn(`[Instagram Puppeteer] Erro ao fechar browser após erro:`, closeErr.message);
+      }
       throw pageErr;
     }
   } catch (err) {
