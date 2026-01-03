@@ -1,7 +1,7 @@
 // app/screens/ProfileScreen.tsx
-// Tela de perfil do usuário logado (profiles + AuthContext, sem supabase.auth)
+// Tela de perfil do usuário logado (Visualização e Logout)
 
-import React, { useEffect, useState } from 'react';
+import React, { useState, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -11,47 +11,31 @@ import {
   ScrollView,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { AppTheme } from '../../constants/theme';
 import { useAuth } from '../context/AuthContext';
-import { supabase } from '../services/supabaseClient';
-
-type RoleValue = 'usuario' | 'diretoria' | 'admin';
-
-const ROLE_OPTIONS: { value: RoleValue; label: string; description: string }[] = [
-  {
-    value: 'usuario',
-    label: 'Usuário / Atleta',
-    description: 'Participante comum (atleta ou usuário geral).',
-  },
-  {
-    value: 'diretoria',
-    label: 'Técnico / Diretoria',
-    description: 'Técnico, comissão ou membro da diretoria.',
-  },
-  {
-    value: 'admin',
-    label: 'Admin HandLuz',
-    description: 'Administração geral do sistema HandLuz.',
-  },
-];
 
 export default function ProfileScreen() {
   const navigation = useNavigation();
-  const { user, refreshProfile, signOut, loading: authLoading } = useAuth();
-
-  const [selectedRole, setSelectedRole] = useState<RoleValue>('usuario');
-  const [saving, setSaving] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [comboOpen, setComboOpen] = useState(false);
+  const { user, signOut, loading: authLoading } = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
 
-  useEffect(() => {
-    if (user?.role && ['usuario', 'diretoria', 'admin'].includes(user.role)) {
-      setSelectedRole(user.role as RoleValue);
-    }
-  }, [user]);
+  useLayoutEffect(() => {
+    // 1. Esconde o cabeçalho "branco" do navegador Pai (que está duplicando)
+    navigation.getParent()?.setOptions({ headerShown: false });
+
+    // 2. Configura o cabeçalho DESTA tela para ser o Verde
+    navigation.setOptions({
+      headerShown: true,
+      headerTitle: 'Meu Perfil',
+      headerStyle: {
+        backgroundColor: AppTheme.primary, // Fundo Verde
+      },
+      headerTintColor: '#FFFFFF', // Texto/Seta Brancos
+      headerShadowVisible: false,
+    });
+  }, [navigation]);
 
   if (!user) {
     return (
@@ -70,64 +54,24 @@ export default function ProfileScreen() {
     );
   }
 
-  function getRoleLabel(value: RoleValue) {
-    const found = ROLE_OPTIONS.find(o => o.value === value);
-    return found ? found.label : value;
+  function getRoleLabel(role: string | null) {
+    if (role === 'admin') return 'Administrador do Sistema';
+    if (role === 'diretoria') return 'Membro da Diretoria / Técnico';
+    return 'Usuário / Atleta';
   }
 
-  function getRoleDescription(value: RoleValue) {
-    const found = ROLE_OPTIONS.find(o => o.value === value);
-    return found ? found.description : '';
-  }
-
-  function handleChangeRole(value: RoleValue) {
-    setSelectedRole(value);
-    setComboOpen(false);
-  }
-
-  async function handleSaveRole() {
-    const currentEmail = user?.email;
-    if (!currentEmail) return;
-
-    setSaving(true);
-    setFeedback(null);
-    setError(null);
-
-    try {
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ role: selectedRole })
-        .eq('email', currentEmail);
-
-      if (updateError) {
-        console.error('[ProfileScreen] Erro ao atualizar role:', updateError.message);
-        setError('Não foi possível salvar o tipo de usuário. Tente novamente.');
-        return;
-      }
-
-      if (typeof refreshProfile === 'function') {
-        await refreshProfile();
-      }
-
-      setFeedback('Tipo de usuário atualizado com sucesso!');
-    } catch (err) {
-      console.error('[ProfileScreen] Erro inesperado ao salvar role:', err);
-      setError('Ocorreu um erro inesperado ao salvar. Tente novamente.');
-    } finally {
-      setSaving(false);
-      setComboOpen(false);
-    }
+  function getRoleDescription(role: string | null) {
+    if (role === 'admin') return 'Acesso total a todas as configurações, gestão de times, diretoria e financeiro.';
+    if (role === 'diretoria') return 'Pode gerenciar times, atletas, agenda de treinos e visualizar dados administrativos.';
+    return 'Pode visualizar seus treinos, carteirinha digital e agenda de jogos.';
   }
 
   async function handleLogout() {
     setLoggingOut(true);
     try {
       await signOut();
-      // O ProfileStackNavigator detecta automaticamente a mudança de estado
-      // e navega para LoginMain quando o usuário é removido
     } catch (err) {
       console.error('[ProfileScreen] Erro ao fazer logout:', err);
-      setError('Erro ao fazer logout. Tente novamente.');
     } finally {
       setLoggingOut(false);
     }
@@ -139,99 +83,41 @@ export default function ProfileScreen() {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* TÍTULO E INTRODUÇÃO (PADRÃO, SEM CARD) */}
-        <Text style={styles.title}>Meu perfil</Text>
+        {/* Subtítulo simples, já que o título principal está na barra verde */}
         <Text style={styles.subtitle}>
-          Veja seus dados de acesso e defina como você participa do HandLuz.
+          Seus dados de acesso e nível de permissão no HandLuz.
         </Text>
 
-        {/* INFORMAÇÕES PESSOAIS */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Informações pessoais</Text>
-
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Nome completo</Text>
-            <Text style={styles.infoValue}>{user.fullName ?? '—'}</Text>
+        {/* CARTÃO DE IDENTIFICAÇÃO */}
+        <View style={styles.idCard}>
+          <View style={styles.avatarContainer}>
+             <Ionicons name="person" size={32} color={AppTheme.primary} />
           </View>
-
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>E-mail</Text>
-            <Text style={styles.infoValue}>{user.email ?? '—'}</Text>
-          </View>
-        </View>
-
-        {/* PAPEL NO HANDLUZ */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Papel no HandLuz</Text>
-          <Text style={styles.sectionHelper}>
-            Selecione se você atua como atleta/usuário, técnico/diretoria
-            ou administrador do sistema.
-          </Text>
-
-          <View style={styles.comboWrapper}>
-            <Text style={styles.comboLabel}>Tipo de usuário</Text>
-
-            <TouchableOpacity
-              style={styles.combo}
-              onPress={() => setComboOpen(prev => !prev)}
-              activeOpacity={0.85}
-            >
-              <View style={styles.comboTextWrapper}>
-                <Text style={styles.comboSelectedText}>
-                  {getRoleLabel(selectedRole)}
-                </Text>
-                <Text style={styles.comboDescription}>
-                  {getRoleDescription(selectedRole)}
-                </Text>
-              </View>
-              <Text style={styles.comboArrow}>{comboOpen ? '▲' : '▼'}</Text>
-            </TouchableOpacity>
-
-            {comboOpen && (
-              <View style={styles.comboList}>
-                {ROLE_OPTIONS.map(option => (
-                  <TouchableOpacity
-                    key={option.value}
-                    style={[
-                      styles.comboItem,
-                      option.value === selectedRole && styles.comboItemSelected,
-                    ]}
-                    onPress={() => handleChangeRole(option.value)}
-                  >
-                    <Text
-                      style={[
-                        styles.comboItemLabel,
-                        option.value === selectedRole && styles.comboItemLabelSelected,
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                    <Text style={styles.comboItemDescription}>
-                      {option.description}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
+          <View style={styles.idCardContent}>
+            <Text style={styles.idCardName}>{user.fullName || 'Usuário'}</Text>
+            <Text style={styles.idCardEmail}>{user.email}</Text>
+            <View style={styles.roleBadge}>
+              <Text style={styles.roleBadgeText}>
+                {user.role ? user.role.toUpperCase() : 'USUÁRIO'}
+              </Text>
+            </View>
           </View>
         </View>
 
-        {/* FEEDBACK E BOTÃO */}
-        {feedback && <Text style={styles.feedbackText}>{feedback}</Text>}
-        {error && <Text style={styles.errorText}>{error}</Text>}
-
-        <TouchableOpacity
-          style={styles.saveButton}
-          onPress={handleSaveRole}
-          disabled={saving}
-          activeOpacity={0.9}
-        >
-          {saving ? (
-            <ActivityIndicator color="#FFF" />
-          ) : (
-            <Text style={styles.saveButtonText}>Salvar alterações</Text>
-          )}
-        </TouchableOpacity>
+        {/* INFORMAÇÕES DE ACESSO */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Nível de Acesso</Text>
+          <View style={styles.infoBox}>
+            <Ionicons name="shield-checkmark-outline" size={24} color={AppTheme.primary} style={{marginBottom: 8}} />
+            <Text style={styles.infoLabel}>{getRoleLabel(user.role)}</Text>
+            <Text style={styles.infoValue}>
+              {getRoleDescription(user.role)}
+            </Text>
+            <Text style={styles.infoNote}>
+              * Para alterar seu nível de acesso, contate um administrador.
+            </Text>
+          </View>
+        </View>
 
         {/* BOTÃO DE LOGOUT */}
         <TouchableOpacity
@@ -243,9 +129,14 @@ export default function ProfileScreen() {
           {loggingOut ? (
             <ActivityIndicator color="#FFF" />
           ) : (
-            <Text style={styles.logoutButtonText}>Sair da conta</Text>
+            <>
+              <Ionicons name="log-out-outline" size={20} color="#FFF" style={{marginRight: 8}} />
+              <Text style={styles.logoutButtonText}>Sair da conta</Text>
+            </>
           )}
         </TouchableOpacity>
+
+        <Text style={styles.versionText}>HandLuz App v1.0.0</Text>
       </ScrollView>
     </View>
   );
@@ -263,8 +154,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingVertical: 16,
-    paddingBottom: 24,
+    paddingVertical: 20,
+    paddingBottom: 40,
   },
   emptyContainer: {
     flex: 1,
@@ -272,6 +163,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
+  },
+  // Estilo que faltava anteriormente
+  errorText: {
+    fontSize: 16,
+    color: '#D32F2F',
+    textAlign: 'center',
+    marginBottom: 16,
   },
   loginButton: {
     marginTop: 16,
@@ -286,144 +184,117 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 15,
   },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: AppTheme.textPrimary,
-    marginBottom: 6,
-  },
   subtitle: {
-    fontSize: 13,
-    color: AppTheme.textSecondary,
-    marginBottom: 16,
-  },
-  section: {
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: AppTheme.textPrimary,
-    marginBottom: 8,
-  },
-  sectionHelper: {
-    fontSize: 12,
-    color: AppTheme.textMuted,
-    marginBottom: 10,
-  },
-  infoRow: {
-    marginBottom: 8,
-  },
-  infoLabel: {
-    fontSize: 12,
-    color: AppTheme.textMuted,
-  },
-  infoValue: {
     fontSize: 14,
-    color: AppTheme.textPrimary,
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  comboWrapper: {
-    marginTop: 4,
-  },
-  comboLabel: {
-    fontSize: 13,
     color: AppTheme.textSecondary,
-    marginBottom: 4,
+    marginBottom: 20,
+    marginTop: 4, 
   },
-  combo: {
+  
+  // Cartão de Identidade
+  idCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: AppTheme.border,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: '#FFFFFF',
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
-  comboTextWrapper: {
+  avatarContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#E8F3EC',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  idCardContent: {
     flex: 1,
   },
-  comboSelectedText: {
-    fontSize: 14,
+  idCardName: {
+    fontSize: 18,
+    fontWeight: '700',
     color: AppTheme.textPrimary,
-    fontWeight: '600',
   },
-  comboDescription: {
-    fontSize: 12,
+  idCardEmail: {
+    fontSize: 13,
     color: AppTheme.textMuted,
     marginTop: 2,
   },
-  comboArrow: {
-    marginLeft: 8,
-    fontSize: 12,
-    color: AppTheme.textSecondary,
-  },
-  comboList: {
+  roleBadge: {
     marginTop: 6,
-    borderRadius: 10,
+    backgroundColor: AppTheme.primary,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  roleBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: AppTheme.textPrimary,
+    marginBottom: 10,
+  },
+  infoBox: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
     borderWidth: 1,
     borderColor: AppTheme.border,
-    backgroundColor: '#FFFFFF',
-    overflow: 'hidden',
   },
-  comboItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: AppTheme.border,
-  },
-  comboItemSelected: {
-    backgroundColor: '#E8F3EC',
-  },
-  comboItemLabel: {
-    fontSize: 14,
+  infoLabel: {
+    fontSize: 16,
+    fontWeight: '600',
     color: AppTheme.textPrimary,
-    fontWeight: '500',
+    marginBottom: 4,
   },
-  comboItemLabelSelected: {
-    color: AppTheme.primary,
+  infoValue: {
+    fontSize: 14,
+    color: AppTheme.textSecondary,
+    lineHeight: 20,
   },
-  comboItemDescription: {
+  infoNote: {
+    marginTop: 12,
     fontSize: 12,
     color: AppTheme.textMuted,
-    marginTop: 2,
+    fontStyle: 'italic',
   },
-  saveButton: {
-    marginTop: 18,
-    backgroundColor: AppTheme.primary,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    color: '#FFF',
-    fontWeight: '600',
-    fontSize: 15,
-  },
-  feedbackText: {
-    marginTop: 10,
-    fontSize: 13,
-    color: '#2E7D32',
-  },
-  errorText: {
-    marginTop: 10,
-    fontSize: 13,
-    color: '#D32F2F',
-    textAlign: 'left',
-  },
+
   logoutButton: {
-    marginTop: 12,
-    backgroundColor: '#D32F2F',
+    marginTop: 8,
+    backgroundColor: '#D32F2F', // Vermelho para logout
     borderRadius: 12,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
   },
   logoutButtonText: {
     color: '#FFF',
     fontWeight: '600',
-    fontSize: 15,
+    fontSize: 16,
+  },
+  versionText: {
+    textAlign: 'center',
+    marginTop: 24,
+    color: AppTheme.textMuted,
+    fontSize: 12,
   },
 });
