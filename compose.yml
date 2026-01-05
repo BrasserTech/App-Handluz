@@ -9,9 +9,10 @@ services:
       - FORCE_HTTP=true
       - NODE_ENV=production
     restart: unless-stopped
+    ports:
+      - "3000:3000"
     networks:
       - site-network
-    command: node server/webServer.js
 
 networks:
   site-network:
