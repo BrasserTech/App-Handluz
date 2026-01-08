@@ -13,6 +13,7 @@ import {
   Image,
   Alert,
   Linking,
+  Dimensions,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -75,6 +76,16 @@ export default function ProdutosListScreen() {
   const [activeTab, setActiveTab] = useState<StoreItemType>('product');
   const [items, setItems] = useState<StoreItem[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Calcular número de colunas baseado na largura da tela
+  const screenWidth = Dimensions.get('window').width;
+  const cardWidth = 180; // Ligeiramente reduzido para garantir espaço
+  const padding = 16;
+  const gap = 12;
+  // Garantir espaço à direita: calcular largura disponível considerando padding dos dois lados
+  const availableWidth = screenWidth - (padding * 2);
+  // Calcular quantos cards cabem, garantindo espaço mínimo à direita
+  const numColumns = Math.max(2, Math.floor((availableWidth - gap) / (cardWidth + gap)));
 
   // modal
   const [modalVisible, setModalVisible] = useState(false);
@@ -454,69 +465,89 @@ export default function ProdutosListScreen() {
         <FlatList
           data={items}
           keyExtractor={item => item.id}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 80 }}
+          numColumns={numColumns}
+          contentContainerStyle={{ paddingHorizontal: padding, paddingBottom: 80 }}
+          columnWrapperStyle={numColumns > 1 ? styles.row : undefined}
           renderItem={({ item }) => {
             const imageUrl = getImagePublicUrl(item.image_path);
             const isEvent = item.type === 'event';
 
             return (
-              <View style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.nome}>{item.title || 'Sem título'}</Text>
-                    {!!item.description && (
-                      <Text style={styles.descricao} numberOfLines={2}>
-                        {item.description}
-                      </Text>
-                    )}
-                    <Text style={styles.tagLinha}>
-                      <Ionicons
-                        name={isEvent ? 'megaphone-outline' : 'pricetag-outline'}
-                        size={13}
-                        color={AppTheme.textSecondary}
-                      />{' '}
-                      {isEvent ? 'Evento' : 'Produto'}
-                      {isEvent && item.end_date
-                        ? ` • até ${isoToDisplay(item.end_date)}`
-                        : ''}
-                    </Text>
-                  </View>
-
-                  {imageUrl && (
-                    <Image
-                      source={{ uri: imageUrl }}
-                      style={styles.cardImage}
+              <View style={styles.productCard}>
+                {/* Imagem do produto */}
+                {imageUrl ? (
+                  <Image
+                    source={{ uri: imageUrl }}
+                    style={styles.productImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.productImagePlaceholder}>
+                    <Ionicons
+                      name={isEvent ? 'calendar-outline' : 'shirt-outline'}
+                      size={32}
+                      color={AppTheme.textSecondary}
                     />
-                  )}
-                </View>
+                  </View>
+                )}
 
-                <View style={styles.cardFooter}>
-                  <Text style={styles.preco}>
+                {/* Conteúdo do card */}
+                <View style={styles.cardContent}>
+                  <Text style={styles.productTitle} numberOfLines={1}>
+                    {item.title || 'Sem título'}
+                  </Text>
+                  
+                  {!!item.description && (
+                    <Text style={styles.productDescription} numberOfLines={2}>
+                      {item.description}
+                    </Text>
+                  )}
+
+                  {/* Preço */}
+                  <Text style={styles.productPrice}>
                     {formatPriceDisplay(item.price)}
                   </Text>
 
-                  <View style={styles.cardActionsRow}>
+                  {/* Data de término para eventos */}
+                  {isEvent && item.end_date && (
+                    <View style={styles.eventDateContainer}>
+                      <Ionicons
+                        name="time-outline"
+                        size={10}
+                        color={AppTheme.textSecondary}
+                      />
+                      <Text style={styles.eventDateText} numberOfLines={1}>
+                        {isoToDisplay(item.end_date)}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Botões de ação */}
+                  <View style={styles.cardActionsContainer}>
                     <TouchableOpacity
                       style={styles.buyButton}
                       onPress={() => handleBuyWhatsApp(item)}
+                      activeOpacity={0.8}
                     >
                       <Ionicons
                         name="logo-whatsapp"
-                        size={16}
+                        size={14}
                         color="#FFF"
                       />
-                      <Text style={styles.buyButtonText}>Comprar</Text>
+                      <Text style={styles.buyButtonText}>
+                        Comprar
+                      </Text>
                     </TouchableOpacity>
 
                     {isDiretoriaOrAdmin && (
-                      <>
+                      <View style={styles.adminActions}>
                         <TouchableOpacity
                           style={styles.iconButton}
                           onPress={() => openEditItemModal(item)}
                         >
                           <Ionicons
                             name="create-outline"
-                            size={18}
+                            size={16}
                             color={AppTheme.textSecondary}
                           />
                         </TouchableOpacity>
@@ -526,11 +557,11 @@ export default function ProdutosListScreen() {
                         >
                           <Ionicons
                             name="trash-outline"
-                            size={18}
+                            size={16}
                             color="#D32F2F"
                           />
                         </TouchableOpacity>
-                      </>
+                      </View>
                     )}
                   </View>
                 </View>
@@ -745,71 +776,92 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontWeight: '600',
   },
-  card: {
+  row: {
+    justifyContent: 'flex-start',
+    gap: 12,
+    paddingRight: 16,
+  },
+  // Estilos dos cards de produto
+  productCard: {
     backgroundColor: AppTheme.surface,
-    padding: 12,
     borderRadius: 14,
     marginTop: 10,
     borderWidth: 1,
     borderColor: AppTheme.border,
+    overflow: 'hidden',
+    width: 180,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  cardImage: {
-    width: 70,
-    height: 70,
-    borderRadius: 10,
+  productImage: {
+    width: '100%',
+    height: 138,
     backgroundColor: '#EEE',
   },
-  nome: {
-    fontWeight: '600',
-    fontSize: 15,
-    color: AppTheme.textPrimary,
-    marginBottom: 2,
-  },
-  descricao: {
-    fontSize: 13,
-    color: AppTheme.textSecondary,
-    marginBottom: 4,
-  },
-  tagLinha: {
-    fontSize: 12,
-    color: AppTheme.textSecondary,
-  },
-  cardFooter: {
-    marginTop: 8,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  productImagePlaceholder: {
+    width: '100%',
+    height: 138,
+    backgroundColor: '#EEE',
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  preco: {
+  cardContent: {
+    padding: 10,
+  },
+  productTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: AppTheme.textPrimary,
+    marginBottom: 4,
+  },
+  productDescription: {
+    fontSize: 11,
+    color: AppTheme.textSecondary,
+    lineHeight: 14,
+    marginBottom: 6,
+  },
+  productPrice: {
     fontSize: 14,
     fontWeight: '700',
     color: AppTheme.primaryDark,
+    marginBottom: 6,
   },
-  cardActionsRow: {
+  eventDateContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 3,
+    marginBottom: 8,
+  },
+  eventDateText: {
+    fontSize: 10,
+    color: AppTheme.textSecondary,
+  },
+  cardActionsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
   },
   buyButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 5,
     borderRadius: 999,
     backgroundColor: '#25D366',
-    marginRight: 6,
+    gap: 4,
+    flex: 1,
+    marginRight: 4,
   },
   buyButtonText: {
-    marginLeft: 4,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: '#FFF',
   },
+  adminActions: {
+    flexDirection: 'row',
+    gap: 4,
+  },
   iconButton: {
-    paddingHorizontal: 6,
+    paddingHorizontal: 4,
     paddingVertical: 4,
   },
   fab: {
