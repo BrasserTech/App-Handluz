@@ -1,6 +1,7 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import HomeScreen from '../screens/HomeScreen';
+import NoticiasScreen from '../screens/NoticiasScreen';
 import ProfileOrLoginScreen from './ProfileOrLoginScreen';
 import { AppTheme } from '../../constants/theme';
 // Importação corrigida saindo da pasta app
@@ -8,6 +9,7 @@ import { HeaderProfile } from '../../components/HeaderProfile';
 
 export type HomeStackParamList = {
   HomeMain: undefined;
+  Noticias: undefined;
   Profile: undefined;
 };
 
@@ -26,6 +28,7 @@ export default function HomeStackNavigator() {
       }}
     >
       <Stack.Screen name="HomeMain" component={HomeScreen} options={{ title: 'Início' }} />
+      <Stack.Screen name="Noticias" component={NoticiasScreen} options={{ title: 'Notícias' }} />
       
       {/* Tela de Login/Perfil fica aqui. Ocultamos o header da stack para usar o da própria tela */}
       <Stack.Screen 

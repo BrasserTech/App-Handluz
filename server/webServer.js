@@ -11,6 +11,8 @@ const url = require('url');
 
 const PORT = process.env.PORT || 3000;
 const DIST_PATH = path.join(__dirname, '..', 'dist');
+const UPLOADS_PATH = path.join(__dirname, '..', 'uploads');
+const NEWS_UPLOADS_PATH = path.join(UPLOADS_PATH, 'news');
 // Caminhos dos certificados mkcert (opcional, não necessário com Cloudflared)
 const CERT_PATH = path.join(__dirname, '..', 'localhost+2.pem');
 const KEY_PATH = path.join(__dirname, '..', 'localhost+2-key.pem');
@@ -23,9 +25,11 @@ const mimeTypes = {
   '.json': 'application/json',
   '.png': 'image/png',
   '.jpg': 'image/jpg',
+  '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
+  '.webp': 'image/webp',
   '.ttf': 'font/ttf',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
@@ -48,6 +52,58 @@ function getContentType(filePath) {
   }
   
   return contentType;
+}
+
+function ensureNewsUploadsPath() {
+  if (!fs.existsSync(NEWS_UPLOADS_PATH)) {
+    fs.mkdirSync(NEWS_UPLOADS_PATH, { recursive: true });
+  }
+}
+
+function getRequestProtocol(req) {
+  const forwardedProto = req.headers['x-forwarded-proto'];
+  if (forwardedProto) return forwardedProto.toString().split(',')[0];
+  return req.connection && req.connection.encrypted ? 'https' : 'http';
+}
+
+function getRequestBaseUrl(req) {
+  const protocol = getRequestProtocol(req);
+  const host = req.headers.host || `localhost:${PORT}`;
+  return `${protocol}://${host}`;
+}
+
+function getImageExtension(mimeType) {
+  if (!mimeType) return 'jpg';
+  const normalized = mimeType.toLowerCase();
+  if (normalized.includes('png')) return 'png';
+  if (normalized.includes('webp')) return 'webp';
+  if (normalized.includes('jpeg')) return 'jpg';
+  if (normalized.includes('jpg')) return 'jpg';
+  return 'jpg';
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+      if (body.length > 15 * 1024 * 1024) {
+        reject(new Error('Payload muito grande'));
+      }
+    });
+    req.on('end', () => {
+      if (!body) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(body));
+      } catch (err) {
+        reject(err);
+      }
+    });
+    req.on('error', err => reject(err));
+  });
 }
 
 function serveFile(req, res, filePath) {
@@ -172,6 +228,90 @@ function handleRequest(req, res) {
       timestamp: new Date().toISOString(),
       port: PORT 
     }));
+    return;
+  }
+
+  if (pathname === '/api/client-logs' && req.method === 'POST') {
+    readJsonBody(req)
+      .then(body => {
+        const level = body.level || 'log';
+        const args = Array.isArray(body.args) ? body.args : [];
+        const meta = body.meta || {};
+        const timestamp = body.timestamp || new Date().toISOString();
+        const line = `[WebLog] ${timestamp} ${level.toUpperCase()} ${args.join(' ')} ${JSON.stringify(meta)}`;
+        if (level === 'error') {
+          console.error(line);
+        } else if (level === 'warn') {
+          console.warn(line);
+        } else {
+          console.log(line);
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      })
+      .catch(err => {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message || 'Erro ao processar log' }));
+      });
+    return;
+  }
+
+  if (pathname === '/api/news-images' && req.method === 'POST') {
+    readJsonBody(req)
+      .then(body => {
+        const base64Raw = body.base64;
+        const mimeType = body.mimeType;
+
+        if (!base64Raw) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Imagem não enviada' }));
+          return;
+        }
+
+        const base64 = base64Raw.includes('base64,')
+          ? base64Raw.split('base64,')[1]
+          : base64Raw;
+
+        const buffer = Buffer.from(base64, 'base64');
+        if (!buffer.length) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Imagem inválida' }));
+          return;
+        }
+
+        if (buffer.length > 5 * 1024 * 1024) {
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Imagem acima de 5MB' }));
+          return;
+        }
+
+        ensureNewsUploadsPath();
+        const extension = getImageExtension(mimeType);
+        const fileName = `news-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
+        const filePath = path.join(NEWS_UPLOADS_PATH, fileName);
+        fs.writeFileSync(filePath, buffer);
+
+        const baseUrl = getRequestBaseUrl(req);
+        const publicUrl = `${baseUrl}/api/news-images/${fileName}`;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ url: publicUrl }));
+      })
+      .catch(err => {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message || 'Erro ao processar imagem' }));
+      });
+    return;
+  }
+
+  if (pathname && pathname.startsWith('/api/news-images/')) {
+    const fileName = path.basename(pathname.replace('/api/news-images/', ''));
+    const filePath = path.join(NEWS_UPLOADS_PATH, fileName);
+    if (!fs.existsSync(filePath)) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Imagem não encontrada' }));
+      return;
+    }
+    serveFile(req, res, filePath);
     return;
   }
 

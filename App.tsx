@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -27,6 +27,65 @@ function AppContent() {
 }
 
 export default function App() {
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+
+    const origin = window.location.origin;
+    const originalError = console.error;
+
+    function serializeArg(arg: unknown) {
+      if (arg instanceof Error) {
+        return { name: arg.name, message: arg.message, stack: arg.stack };
+      }
+      if (typeof arg === 'string') {
+        return arg;
+      }
+      try {
+        return JSON.stringify(arg);
+      } catch {
+        return String(arg);
+      }
+    }
+
+    function sendLog(level: 'error' | 'warn' | 'log', args: unknown[], meta?: Record<string, unknown>) {
+      const payload = {
+        level,
+        args: args.map(serializeArg),
+        meta: meta ?? {},
+        timestamp: new Date().toISOString(),
+      };
+      fetch(`${origin}/api/client-logs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => {});
+    }
+
+    console.error = (...args: unknown[]) => {
+      originalError(...args);
+      sendLog('error', args);
+    };
+
+    const onError = (event: ErrorEvent) => {
+      sendLog('error', [event.message], { stack: event.error?.stack, filename: event.filename, lineno: event.lineno, colno: event.colno });
+    };
+
+    const onRejection = (event: PromiseRejectionEvent) => {
+      sendLog('error', [event.reason], { type: 'unhandledrejection' });
+    };
+
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+
+    return () => {
+      console.error = originalError;
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
+    };
+  }, []);
+
   return (
     <SafeAreaProvider>
       <AuthProvider>

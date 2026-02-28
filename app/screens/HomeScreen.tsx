@@ -29,6 +29,13 @@ const handluzLogo = require('../../assets/images/logo_handluz.png');
 type Team = { id: string; name: string; };
 type SummaryStats = { athletes: number; teams: number; trainingsMonth: number; };
 type Competition = { id: string; name: string | null; category: string | null; location: string | null; start_date: string | null; end_date: string | null; pdf_url: string | null; };
+type NewsItem = {
+  id: string;
+  title: string;
+  description?: string | null;
+  image_url?: string | null;
+  created_at: string | null;
+};
 
 
 // HELPERS DE DATA
@@ -48,6 +55,7 @@ export default function HomeScreen() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [stats, setStats] = useState<SummaryStats>({ athletes: 0, teams: 0, trainingsMonth: 0 });
   const [competitions, setCompetitions] = useState<Competition[]>([]);
+  const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
 
   // Carrega dados iniciais
@@ -73,6 +81,27 @@ export default function HomeScreen() {
           .or(`start_date.gte.${todayIso},end_date.gte.${todayIso}`).order('start_date', { ascending: true }),
       ]);
 
+      let newsData: NewsItem[] = [];
+      const fullNewsResp = await supabase
+        .from('news')
+        .select('id, title, description, image_url, created_at')
+        .order('created_at', { ascending: false })
+        .limit(5);
+      if (fullNewsResp.error) {
+        if (fullNewsResp.error.message.includes('does not exist')) {
+          const fallbackResp = await supabase
+            .from('news')
+            .select('id, title, created_at')
+            .order('created_at', { ascending: false })
+            .limit(5);
+          if (!fallbackResp.error) {
+            newsData = (fallbackResp.data ?? []) as NewsItem[];
+          }
+        }
+      } else {
+        newsData = (fullNewsResp.data ?? []) as NewsItem[];
+      }
+
       setTeams(teamsResp.data ?? []);
       setStats({
         athletes: athletesResp.count ?? 0,
@@ -80,6 +109,7 @@ export default function HomeScreen() {
         trainingsMonth: trainingsResp.count ?? 0,
       });
       setCompetitions(compsResp.data ?? []);
+      setNews(newsData);
     } catch (err) {
       // log silencioso
     } finally {
@@ -93,6 +123,10 @@ export default function HomeScreen() {
 
   async function handleOpenUrl(url?: string | null) {
     if (url) await Linking.openURL(url);
+  }
+
+  function handleNavigateToNoticias() {
+    navigation.navigate('Noticias');
   }
 
 
@@ -132,6 +166,36 @@ export default function HomeScreen() {
         ))}
       </View>
 
+      <View style={styles.newsHeaderRow}>
+        <Text style={styles.sectionTitle}>NOTÍCIAS</Text>
+        <TouchableOpacity style={styles.seeAllButton} onPress={handleNavigateToNoticias}>
+          <Text style={styles.seeAllText}>Ver todas</Text>
+          <Ionicons name="chevron-forward" size={16} color={AppTheme.primary} />
+        </TouchableOpacity>
+      </View>
+
+      {news.length === 0 ? (
+        <Text style={styles.emptyText}>Nenhuma notícia cadastrada.</Text>
+      ) : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.newsCarousel}
+        >
+          {news.map(item => (
+            <View key={item.id} style={styles.newsCard}>
+              {item.image_url ? (
+                <Image source={{ uri: item.image_url }} style={styles.newsImage} />
+              ) : null}
+              <Text style={styles.newsTitle}>{item.title}</Text>
+              {item.description ? (
+                <Text style={styles.newsDescription}>{item.description}</Text>
+              ) : null}
+            </View>
+          ))}
+        </ScrollView>
+      )}
+
     </ScrollView>
   );
 }
@@ -153,4 +217,13 @@ const styles = StyleSheet.create({
   categoriesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   categoryButton: { width: CATEGORY_WIDTH, aspectRatio: 1, backgroundColor: AppTheme.primary, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   categoryText: { marginTop: 6, color: '#FFF', fontWeight: '600', fontSize: 11 },
+  newsHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 20, marginBottom: 10 },
+  seeAllButton: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  seeAllText: { color: AppTheme.primary, fontWeight: '600' },
+  emptyText: { fontSize: 13, color: AppTheme.textSecondary },
+  newsCarousel: { paddingRight: 8 },
+  newsCard: { width: isDesktop ? 360 : Math.min(width - 48, 300), backgroundColor: AppTheme.surface, borderRadius: 16, borderWidth: 1, borderColor: AppTheme.border, padding: 14, marginRight: 12 },
+  newsImage: { width: '100%', height: 160, borderRadius: 12, marginBottom: 10 },
+  newsTitle: { fontSize: 15, fontWeight: '700', color: AppTheme.textPrimary },
+  newsDescription: { marginTop: 6, fontSize: 13, color: AppTheme.textSecondary },
 });

@@ -12,8 +12,10 @@ import {
   TextInput,
   Alert,
   Linking,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
@@ -28,18 +30,30 @@ type Competition = {
   location: string | null;
   start_date: string | null; // yyyy-mm-dd
   end_date: string | null;   // yyyy-mm-dd
-  regulation_url: string | null;
+  category?: string | null;
+  status?: 'agendado' | 'em_andamento' | 'encerrado';
+  youtube_link?: string | null;
+  placement?: string | null;
 };
 
-type UpcomingMatch = {
+type Match = {
   id: string;
-  competition_title: string | null;
-  opponent: string | null;
-  category: string | null;
-  match_date: string | null; // yyyy-mm-dd
-  match_time: string | null; // HH:MM
-  location: string | null;
-  stream_url: string | null;
+  competition_id: string | null;
+  home_team: string | null;
+  away_team: string | null;
+  score_home: number | null;
+  score_away: number | null;
+  match_time: string | null;
+  youtube_link: string | null;
+  round: string | null;
+};
+
+type NewsItem = {
+  id: string;
+  title: string;
+  created_at: string | null;
+  image_url?: string | null;
+  description?: string | null;
 };
 
 // ------- Utilidades simples de data/hora -------
@@ -84,10 +98,12 @@ function digitsToIso(digits: string): string | null {
   return `${y}-${m}-${d}`; // yyyy-mm-dd
 }
 
+
 // ------- Componente principal -------
 
 export default function DiretoriaScreen() {
-  const { isDiretoriaOrAdmin } = usePermissions();
+  const { user, isDiretoriaOrAdmin } = usePermissions();
+  const isAdmin = user?.role === 'admin';
 
   const [loading, setLoading] = useState(true);
 
@@ -105,22 +121,30 @@ export default function DiretoriaScreen() {
   const [compEndDisplay, setCompEndDisplay] = useState('');
   const [compStartDigits, setCompStartDigits] = useState('');
   const [compEndDigits, setCompEndDigits] = useState('');
-  const [compRegulationUrl, setCompRegulationUrl] = useState('');
 
   // Próximos jogos
-  const [matches, setMatches] = useState<UpcomingMatch[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
   const [matchModalVisible, setMatchModalVisible] = useState(false);
   const [savingMatch, setSavingMatch] = useState(false);
-  const [editingMatch, setEditingMatch] = useState<UpcomingMatch | null>(null);
+  const [editingMatch, setEditingMatch] = useState<Match | null>(null);
 
-  const [matchCompetitionTitle, setMatchCompetitionTitle] = useState('');
-  const [matchOpponent, setMatchOpponent] = useState('');
-  const [matchCategory, setMatchCategory] = useState('');
-  const [matchLocation, setMatchLocation] = useState('');
-  const [matchDateDisplay, setMatchDateDisplay] = useState('');
-  const [matchDateDigits, setMatchDateDigits] = useState('');
+  const [matchCompetitionId, setMatchCompetitionId] = useState('');
+  const [matchHome, setMatchHome] = useState('');
+  const [matchAway, setMatchAway] = useState('');
+  const [matchRound, setMatchRound] = useState('');
   const [matchTime, setMatchTime] = useState('');
-  const [matchStreamUrl, setMatchStreamUrl] = useState('');
+  const [matchLink, setMatchLink] = useState('');
+  const [matchScoreHome, setMatchScoreHome] = useState('');
+  const [matchScoreAway, setMatchScoreAway] = useState('');
+
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
+  const [newsModalVisible, setNewsModalVisible] = useState(false);
+  const [savingNews, setSavingNews] = useState(false);
+  const [editingNews, setEditingNews] = useState<NewsItem | null>(null);
+  const [newsTitle, setNewsTitle] = useState('');
+  const [newsDescription, setNewsDescription] = useState('');
+  const [newsImageUri, setNewsImageUri] = useState<string | null>(null);
+  const [newsImageUrl, setNewsImageUrl] = useState<string | null>(null);
 
   // ---------------- CARREGAMENTO ----------------
 
@@ -134,17 +158,39 @@ export default function DiretoriaScreen() {
         supabase
           .from('competitions')
           .select(
-            'id, title, description, location, start_date, end_date, regulation_url'
+            'id, title, description, location, start_date, end_date'
           )
           .order('start_date', { ascending: true }),
         supabase
-          .from('upcoming_matches')
+          .from('matches')
           .select(
-            'id, competition_title, opponent, category, match_date, match_time, location, stream_url'
+            'id, competition_id, home_team, away_team, score_home, score_away, match_time, youtube_link, round'
           )
-          .order('match_date', { ascending: true })
-          .order('match_time', { ascending: true }),
+          .order('created_at', { ascending: false }),
       ]);
+
+      let newsData: NewsItem[] = [];
+      const fullNewsResp = await supabase
+        .from('news')
+        .select('id, title, created_at, image_url, description')
+        .order('created_at', { ascending: false });
+
+      if (fullNewsResp.error) {
+        console.error('[Diretoria] Erro ao carregar notícias:', fullNewsResp.error.message);
+        if (fullNewsResp.error.message.includes('does not exist')) {
+          const fallbackResp = await supabase
+            .from('news')
+            .select('id, title, created_at')
+            .order('created_at', { ascending: false });
+          if (fallbackResp.error) {
+            console.error('[Diretoria] Erro ao carregar notícias:', fallbackResp.error.message);
+          } else {
+            newsData = (fallbackResp.data ?? []) as NewsItem[];
+          }
+        }
+      } else {
+        newsData = (fullNewsResp.data ?? []) as NewsItem[];
+      }
 
       if (competitionsError) {
         console.error('[Diretoria] Erro ao carregar competições:', competitionsError.message);
@@ -154,7 +200,8 @@ export default function DiretoriaScreen() {
       }
 
       setCompetitions((competitionsData ?? []) as Competition[]);
-      setMatches((matchesData ?? []) as UpcomingMatch[]);
+      setMatches((matchesData ?? []) as Match[]);
+      setNewsItems(newsData);
     } catch (err) {
       console.error('[Diretoria] Erro inesperado ao carregar dados:', err);
       Alert.alert('Erro', 'Ocorreu um erro ao carregar as informações.');
@@ -178,7 +225,6 @@ export default function DiretoriaScreen() {
     setCompEndDisplay('');
     setCompStartDigits('');
     setCompEndDigits('');
-    setCompRegulationUrl('');
     setCompetitionModalVisible(true);
   }
 
@@ -187,7 +233,6 @@ export default function DiretoriaScreen() {
     setCompTitle(item.title);
     setCompDescription(item.description ?? '');
     setCompLocation(item.location ?? '');
-    setCompRegulationUrl(item.regulation_url ?? '');
     setCompStartDigits('');
     setCompEndDigits('');
     setCompStartDisplay(
@@ -226,7 +271,6 @@ export default function DiretoriaScreen() {
       location: compLocation.trim() || null,
       start_date: startIso,
       end_date: endIso,
-      regulation_url: compRegulationUrl.trim() || null,
     };
 
     setSavingCompetition(true);
@@ -299,63 +343,71 @@ export default function DiretoriaScreen() {
 
   function openNewMatchModal() {
     setEditingMatch(null);
-    setMatchCompetitionTitle('');
-    setMatchOpponent('');
-    setMatchCategory('');
-    setMatchLocation('');
-    setMatchDateDisplay('');
-    setMatchDateDigits('');
+    setMatchCompetitionId('');
+    setMatchHome('');
+    setMatchAway('');
+    setMatchRound('');
     setMatchTime('');
-    setMatchStreamUrl('');
+    setMatchLink('');
+    setMatchScoreHome('');
+    setMatchScoreAway('');
     setMatchModalVisible(true);
   }
 
-  function openEditMatchModal(item: UpcomingMatch) {
+  function openEditMatchModal(item: Match) {
     setEditingMatch(item);
-    setMatchCompetitionTitle(item.competition_title ?? '');
-    setMatchOpponent(item.opponent ?? '');
-    setMatchCategory(item.category ?? '');
-    setMatchLocation(item.location ?? '');
-    setMatchDateDisplay(item.match_date ? isoToBrDate(item.match_date) : '');
-    setMatchDateDigits('');
+    setMatchCompetitionId(item.competition_id ?? '');
+    setMatchHome(item.home_team ?? '');
+    setMatchAway(item.away_team ?? '');
+    setMatchRound(item.round ?? '');
     setMatchTime(item.match_time ?? '');
-    setMatchStreamUrl(item.stream_url ?? '');
+    setMatchLink(item.youtube_link ?? '');
+    setMatchScoreHome(
+      typeof item.score_home === 'number' ? String(item.score_home) : ''
+    );
+    setMatchScoreAway(
+      typeof item.score_away === 'number' ? String(item.score_away) : ''
+    );
     setMatchModalVisible(true);
-  }
-
-  function handleMatchDateChange(text: string) {
-    const masked = maskDate(text);
-    setMatchDateDisplay(masked);
-    setMatchDateDigits(masked.replace(/\D/g, ''));
   }
 
   async function handleSaveMatch() {
-    if (!matchCompetitionTitle.trim() && !matchOpponent.trim()) {
+    if (!matchCompetitionId) {
       Alert.alert(
         'Campos obrigatórios',
-        'Informe pelo menos o nome da competição ou o adversário.'
+        'Selecione a competição relacionada ao jogo.'
+      );
+      return;
+    }
+    if (!matchHome.trim() || !matchAway.trim()) {
+      Alert.alert(
+        'Campos obrigatórios',
+        'Informe os times da casa e visitante.'
       );
       return;
     }
 
-    const dateIso =
-      matchDateDigits.length === 8 ? digitsToIso(matchDateDigits) : null;
+    const parsedHome =
+      matchScoreHome.trim() !== '' ? parseInt(matchScoreHome, 10) : null;
+    const parsedAway =
+      matchScoreAway.trim() !== '' ? parseInt(matchScoreAway, 10) : null;
 
     const payload = {
-      competition_title: matchCompetitionTitle.trim() || null,
-      opponent: matchOpponent.trim() || null,
-      category: matchCategory.trim() || null,
-      location: matchLocation.trim() || null,
-      match_date: dateIso,
+      competition_id: matchCompetitionId,
+      home_team: matchHome.trim(),
+      away_team: matchAway.trim(),
+      round: matchRound.trim() || null,
       match_time: matchTime.trim() || null,
-      stream_url: matchStreamUrl.trim() || null,
+      youtube_link: matchLink.trim() || null,
+      score_home: Number.isNaN(parsedHome) ? null : parsedHome,
+      score_away: Number.isNaN(parsedAway) ? null : parsedAway,
     };
 
     setSavingMatch(true);
     try {
       if (!editingMatch) {
         const { error } = await supabase
-          .from('upcoming_matches')
+          .from('matches')
           .insert(payload);
         if (error) {
           console.error('[Diretoria] Erro ao inserir jogo:', error.message);
@@ -365,7 +417,7 @@ export default function DiretoriaScreen() {
         }
       } else {
         const { error } = await supabase
-          .from('upcoming_matches')
+          .from('matches')
           .update(payload)
           .eq('id', editingMatch.id);
         if (error) {
@@ -387,7 +439,7 @@ export default function DiretoriaScreen() {
     }
   }
 
-  async function handleDeleteMatch(item: UpcomingMatch) {
+  async function handleDeleteMatch(item: Match) {
     Alert.alert(
       'Excluir jogo',
       'Tem certeza de que deseja excluir este jogo?',
@@ -399,7 +451,7 @@ export default function DiretoriaScreen() {
           onPress: async () => {
             try {
               const { error } = await supabase
-                .from('upcoming_matches')
+                .from('matches')
                 .delete()
                 .eq('id', item.id);
 
@@ -412,6 +464,198 @@ export default function DiretoriaScreen() {
             } catch (err) {
               console.error('[Diretoria] Erro inesperado ao excluir jogo:', err);
               Alert.alert('Erro', 'Ocorreu um erro ao excluir o jogo.');
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  function openNewNewsModal() {
+    setEditingNews(null);
+    setNewsTitle('');
+    setNewsDescription('');
+    setNewsImageUri(null);
+    setNewsImageUrl(null);
+    setNewsModalVisible(true);
+  }
+
+  function openEditNewsModal(item: NewsItem) {
+    setEditingNews(item);
+    setNewsTitle(item.title);
+    setNewsDescription(item.description ?? '');
+    setNewsImageUri(null);
+    setNewsImageUrl(item.image_url ?? null);
+    setNewsModalVisible(true);
+  }
+
+  async function pickNewsImage() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(
+        'Permissão necessária',
+        'Precisamos de acesso às fotos para selecionar a imagem.'
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+    });
+
+    if (result.canceled) return;
+
+    const asset = result.assets[0];
+    setNewsImageUri(asset.uri);
+  }
+
+  function removeNewsImage() {
+    setNewsImageUri(null);
+    setNewsImageUrl(null);
+  }
+
+  async function uploadNewsImage(
+    localUri: string,
+    newsId: string
+  ): Promise<string | null> {
+    try {
+      const response = await fetch(localUri);
+      const blob = await response.blob();
+
+      const extGuess =
+        (blob.type && blob.type.split('/')[1]) ||
+        localUri.split('.').pop()?.toLowerCase() ||
+        'jpg';
+      const fileExt = ['jpg', 'jpeg', 'png', 'webp'].includes(extGuess)
+        ? extGuess
+        : 'jpg';
+      const filePath = `news/${newsId}-${Date.now()}.${fileExt}`;
+
+      const { data, error } = await supabase.storage
+        .from('images')
+        .upload(filePath, blob, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: blob.type || 'image/jpeg',
+        });
+
+      if (error) {
+        console.error('[Noticias] Erro ao enviar imagem:', error.message);
+        Alert.alert('Imagem', 'Não foi possível enviar a imagem.');
+        return null;
+      }
+
+      const { data: publicData } = supabase.storage
+        .from('images')
+        .getPublicUrl(data.path);
+
+      return publicData.publicUrl ?? null;
+    } catch (err) {
+      console.error('[Noticias] Erro inesperado ao enviar imagem:', err);
+      Alert.alert('Imagem', 'Ocorreu um erro ao enviar a imagem.');
+      return null;
+    }
+  }
+
+  async function handleSaveNews() {
+    if (!newsTitle.trim()) {
+      Alert.alert('Campos obrigatórios', 'Informe ao menos o título da notícia.');
+      return;
+    }
+
+    setSavingNews(true);
+    try {
+      if (!editingNews) {
+        const { data, error } = await supabase
+          .from('news')
+          .insert({ title: newsTitle.trim(), description: newsDescription.trim() || null })
+          .select('id')
+          .single();
+        if (error) {
+          console.error('[Noticias] Erro ao inserir notícia:', error.message);
+          Alert.alert('Erro', 'Não foi possível salvar a notícia.');
+          return;
+        }
+
+        if (data?.id && newsImageUri) {
+          const uploadedUrl = await uploadNewsImage(newsImageUri, data.id);
+          if (uploadedUrl) {
+            const { error: updateError } = await supabase
+              .from('news')
+              .update({ image_url: uploadedUrl })
+              .eq('id', data.id);
+            if (updateError) {
+              console.error('[Noticias] Erro ao atualizar imagem:', updateError.message);
+              Alert.alert('Imagem', 'Não foi possível salvar a imagem da notícia.');
+            }
+          }
+        }
+      } else {
+        let nextImageUrl = newsImageUrl ?? null;
+        if (newsImageUri) {
+          const uploadedUrl = await uploadNewsImage(newsImageUri, editingNews.id);
+          if (uploadedUrl) {
+            nextImageUrl = uploadedUrl;
+          } else {
+            nextImageUrl = editingNews.image_url ?? null;
+          }
+        }
+
+        const { error } = await supabase
+          .from('news')
+          .update({
+            title: newsTitle.trim(),
+            description: newsDescription.trim() || null,
+            image_url: nextImageUrl,
+          })
+          .eq('id', editingNews.id);
+        if (error) {
+          console.error('[Noticias] Erro ao atualizar notícia:', error.message);
+          Alert.alert('Erro', 'Não foi possível atualizar a notícia.');
+          return;
+        }
+      }
+
+      setNewsModalVisible(false);
+      setEditingNews(null);
+      setNewsDescription('');
+      setNewsImageUri(null);
+      setNewsImageUrl(null);
+      await loadData();
+    } catch (err) {
+      console.error('[Noticias] Erro inesperado ao salvar notícia:', err);
+      Alert.alert('Erro', 'Ocorreu um erro ao salvar a notícia.');
+    } finally {
+      setSavingNews(false);
+    }
+  }
+
+  async function handleDeleteNews(item: NewsItem) {
+    Alert.alert(
+      'Excluir notícia',
+      `Tem certeza de que deseja excluir "${item.title}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('news')
+                .delete()
+                .eq('id', item.id);
+
+              if (error) {
+                console.error('[Noticias] Erro ao excluir notícia:', error.message);
+                Alert.alert('Erro', 'Não foi possível excluir a notícia.');
+                return;
+              }
+              await loadData();
+            } catch (err) {
+              console.error('[Noticias] Erro inesperado ao excluir notícia:', err);
+              Alert.alert('Erro', 'Ocorreu um erro ao excluir a notícia.');
             }
           },
         },
@@ -450,8 +694,7 @@ export default function DiretoriaScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.cardTitle}>Competições / Etapas</Text>
             <Text style={styles.cardDescription}>
-              Cadastre as competições e etapas oficiais, anexando o link do
-              regulamento ou boletim (PDF).
+              Cadastre as competições e etapas oficiais do calendário.
             </Text>
           </View>
 
@@ -510,20 +753,6 @@ export default function DiretoriaScreen() {
                 <Text style={styles.itemBodyText}>{item.description}</Text>
               ) : null}
 
-              {item.regulation_url ? (
-                <TouchableOpacity
-                  onPress={() => openExternalUrl(item.regulation_url)}
-                  style={styles.linkRow}
-                >
-                  <Ionicons
-                    name="document-text-outline"
-                    size={16}
-                    color={AppTheme.primary}
-                    style={{ marginRight: 4 }}
-                  />
-                  <Text style={styles.linkText}>Abrir regulamento / boletim</Text>
-                </TouchableOpacity>
-              ) : null}
             </View>
           ))
         )}
@@ -556,31 +785,38 @@ export default function DiretoriaScreen() {
             Nenhum jogo cadastrado até o momento.
           </Text>
         ) : (
-          matches.map(item => (
-            <View key={item.id} style={styles.itemCard}>
-              <View style={styles.itemHeaderRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.itemTitle}>
-                    {item.opponent || 'Adversário não informado'}
-                  </Text>
-                  {item.category ? (
-                    <Text style={styles.itemSubText}>{item.category}</Text>
-                  ) : null}
-                  <Text style={styles.itemSubText}>
-                    {item.match_date
-                      ? isoToBrDate(item.match_date)
-                      : 'Data não informada'}
-                    {item.match_time ? ` • ${item.match_time}` : ''}
-                  </Text>
-                  {item.location ? (
-                    <Text style={styles.itemSubText}>{item.location}</Text>
-                  ) : null}
-                  {item.competition_title ? (
-                    <Text style={styles.itemSubTextBold}>
-                      Competição: {item.competition_title}
+          matches.map(item => {
+            const competitionName =
+              competitions.find(comp => comp.id === item.competition_id)?.title ??
+              null;
+            return (
+              <View key={item.id} style={styles.itemCard}>
+                <View style={styles.itemHeaderRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.itemTitle}>
+                      {item.home_team || 'Time casa'} x{' '}
+                      {item.away_team || 'Time visitante'}
                     </Text>
-                  ) : null}
-                </View>
+                    {item.round ? (
+                      <Text style={styles.itemSubText}>{item.round}</Text>
+                    ) : null}
+                    {item.match_time ? (
+                      <Text style={styles.itemSubText}>
+                        Horário: {item.match_time}
+                      </Text>
+                    ) : null}
+                    {typeof item.score_home === 'number' &&
+                    typeof item.score_away === 'number' ? (
+                      <Text style={styles.itemSubText}>
+                        Placar: {item.score_home} x {item.score_away}
+                      </Text>
+                    ) : null}
+                    {competitionName ? (
+                      <Text style={styles.itemSubTextBold}>
+                        Competição: {competitionName}
+                      </Text>
+                    ) : null}
+                  </View>
 
                 {isDiretoriaOrAdmin && (
                   <View style={styles.itemActionsRow}>
@@ -604,22 +840,82 @@ export default function DiretoriaScreen() {
                 )}
               </View>
 
-              {item.stream_url ? (
+              {item.youtube_link ? (
                 <TouchableOpacity
-                  onPress={() => openExternalUrl(item.stream_url)}
+                  onPress={() => openExternalUrl(item.youtube_link)}
                   style={styles.linkRow}
                 >
                   <Ionicons
-                    name="play-circle-outline"
+                    name="logo-youtube"
                     size={18}
-                    color={AppTheme.primary}
+                    color="#FF0000"
                     style={{ marginRight: 4 }}
                   />
                   <Text style={styles.linkText}>Assistir transmissão</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
-          ))
+            );
+          })
+        )}
+      </View>
+
+      <View style={styles.cardSection}>
+        <View style={styles.cardHeaderRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle}>Notícias</Text>
+            <Text style={styles.cardDescription}>
+              Cadastre as notícias exibidas na tela inicial.
+            </Text>
+          </View>
+
+          {isAdmin && (
+            <TouchableOpacity
+              style={styles.cardHeaderFab}
+              onPress={openNewNewsModal}
+              activeOpacity={0.9}
+            >
+              <Ionicons name="add" size={22} color="#FFF" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {newsItems.length === 0 ? (
+          <Text style={styles.emptyText}>Nenhuma notícia cadastrada.</Text>
+        ) : (
+          newsItems.map(item => {
+            return (
+              <View key={item.id} style={styles.itemCard}>
+                <View style={styles.itemHeaderRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.itemTitle}>{item.title}</Text>
+                  </View>
+
+                  {isAdmin && (
+                    <View style={styles.itemActionsRow}>
+                      <TouchableOpacity
+                        style={styles.iconButton}
+                        onPress={() => openEditNewsModal(item)}
+                      >
+                        <Ionicons
+                          name="create-outline"
+                          size={18}
+                          color={AppTheme.textSecondary}
+                        />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.iconButton}
+                        onPress={() => handleDeleteNews(item)}
+                      >
+                        <Ionicons name="trash-outline" size={18} color="#C62828" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+
+              </View>
+            );
+          })
         )}
       </View>
 
@@ -684,17 +980,6 @@ export default function DiretoriaScreen() {
               placeholder="__/__/____"
             />
 
-            <Text style={styles.fieldLabel}>
-              Link do regulamento / boletim (PDF)
-            </Text>
-            <TextInput
-              style={styles.input}
-              value={compRegulationUrl}
-              onChangeText={setCompRegulationUrl}
-              placeholder="https://..."
-              autoCapitalize="none"
-            />
-
             <View style={styles.modalButtonsRow}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonOutline]}
@@ -742,45 +1027,62 @@ export default function DiretoriaScreen() {
               {editingMatch ? 'Editar jogo' : 'Novo jogo'}
             </Text>
 
-            <Text style={styles.fieldLabel}>Competição / Etapa</Text>
+            <Text style={styles.fieldLabel}>Competição</Text>
+            {competitions.length === 0 ? (
+              <Text style={styles.emptyText}>
+                Cadastre uma competição antes de criar jogos.
+              </Text>
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.competitionChipsRow}
+              >
+                {competitions.map(item => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[
+                      styles.competitionChip,
+                      matchCompetitionId === item.id && styles.competitionChipActive,
+                    ]}
+                    onPress={() => setMatchCompetitionId(item.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.competitionChipText,
+                        matchCompetitionId === item.id &&
+                          styles.competitionChipTextActive,
+                      ]}
+                    >
+                      {item.title}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+
+            <Text style={styles.fieldLabel}>Time casa</Text>
             <TextInput
               style={styles.input}
-              value={matchCompetitionTitle}
-              onChangeText={setMatchCompetitionTitle}
-              placeholder="Ex.: Liga Estadual, Copa SC..."
+              value={matchHome}
+              onChangeText={setMatchHome}
+              placeholder="Ex.: HandLuz"
             />
 
-            <Text style={styles.fieldLabel}>Adversário</Text>
+            <Text style={styles.fieldLabel}>Time visitante</Text>
             <TextInput
               style={styles.input}
-              value={matchOpponent}
-              onChangeText={setMatchOpponent}
-              placeholder="Ex.: Equipe X, Seleção Y..."
+              value={matchAway}
+              onChangeText={setMatchAway}
+              placeholder="Ex.: Equipe X"
             />
 
-            <Text style={styles.fieldLabel}>Categoria</Text>
+            <Text style={styles.fieldLabel}>Rodada (opcional)</Text>
             <TextInput
               style={styles.input}
-              value={matchCategory}
-              onChangeText={setMatchCategory}
-              placeholder="Adulto, Sub-21, Feminino..."
-            />
-
-            <Text style={styles.fieldLabel}>Local</Text>
-            <TextInput
-              style={styles.input}
-              value={matchLocation}
-              onChangeText={setMatchLocation}
-              placeholder="Ginásio, cidade..."
-            />
-
-            <Text style={styles.fieldLabel}>Data (dd/mm/aaaa)</Text>
-            <TextInput
-              style={styles.input}
-              value={matchDateDisplay}
-              onChangeText={handleMatchDateChange}
-              keyboardType="number-pad"
-              placeholder="__/__/____"
+              value={matchRound}
+              onChangeText={setMatchRound}
+              placeholder="Ex.: Quartas de final"
             />
 
             <Text style={styles.fieldLabel}>Horário (opcional)</Text>
@@ -792,13 +1094,36 @@ export default function DiretoriaScreen() {
               placeholder="HH:MM"
             />
 
+            <View style={styles.scoreRow}>
+              <View style={styles.scoreColumn}>
+                <Text style={styles.fieldLabel}>Placar casa</Text>
+                <TextInput
+                  style={styles.input}
+                  value={matchScoreHome}
+                  onChangeText={setMatchScoreHome}
+                  keyboardType="number-pad"
+                  placeholder="0"
+                />
+              </View>
+              <View style={styles.scoreColumn}>
+                <Text style={styles.fieldLabel}>Placar visitante</Text>
+                <TextInput
+                  style={styles.input}
+                  value={matchScoreAway}
+                  onChangeText={setMatchScoreAway}
+                  keyboardType="number-pad"
+                  placeholder="0"
+                />
+              </View>
+            </View>
+
             <Text style={styles.fieldLabel}>
               Link da transmissão (YouTube, etc.)
             </Text>
             <TextInput
               style={styles.input}
-              value={matchStreamUrl}
-              onChangeText={setMatchStreamUrl}
+              value={matchLink}
+              onChangeText={setMatchLink}
               placeholder="https://..."
               autoCapitalize="none"
             />
@@ -822,6 +1147,97 @@ export default function DiretoriaScreen() {
                 disabled={savingMatch}
               >
                 {savingMatch ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.modalButtonPrimaryText}>Salvar</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={newsModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          if (!savingNews) {
+            setNewsModalVisible(false);
+            setEditingNews(null);
+          }
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>
+              {editingNews ? 'Editar notícia' : 'Nova notícia'}
+            </Text>
+
+            <Text style={styles.fieldLabel}>Título</Text>
+            <TextInput
+              style={styles.input}
+              value={newsTitle}
+              onChangeText={setNewsTitle}
+              placeholder="Ex.: Convocação, Evento, Aviso..."
+            />
+
+            <Text style={styles.fieldLabel}>Descrição</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              value={newsDescription}
+              onChangeText={setNewsDescription}
+              placeholder="Texto da notícia..."
+              multiline
+            />
+
+            <Text style={styles.fieldLabel}>Imagem</Text>
+            <View style={styles.imageRow}>
+              <TouchableOpacity
+                style={styles.imageButton}
+                onPress={pickNewsImage}
+              >
+                <Ionicons name="image-outline" size={16} color={AppTheme.primary} />
+                <Text style={styles.imageButtonText}>Selecionar imagem</Text>
+              </TouchableOpacity>
+
+              {(newsImageUri || newsImageUrl) ? (
+                <TouchableOpacity
+                  style={styles.imageRemoveButton}
+                  onPress={removeNewsImage}
+                >
+                  <Ionicons name="close-circle-outline" size={18} color="#C62828" />
+                  <Text style={styles.imageRemoveText}>Remover</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
+            {(newsImageUri || newsImageUrl) ? (
+              <Image
+                source={{ uri: newsImageUri ?? newsImageUrl ?? '' }}
+                style={styles.newsImagePreview}
+              />
+            ) : null}
+
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonOutline]}
+                onPress={() => {
+                  if (!savingNews) {
+                    setNewsModalVisible(false);
+                    setEditingNews(null);
+                  }
+                }}
+              >
+                <Text style={styles.modalButtonOutlineText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonPrimary]}
+                onPress={handleSaveNews}
+                disabled={savingNews}
+              >
+                {savingNews ? (
                   <ActivityIndicator color="#FFF" />
                 ) : (
                   <Text style={styles.modalButtonPrimaryText}>Salvar</Text>
@@ -931,6 +1347,50 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     marginLeft: 4,
   },
+  imageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 6,
+  },
+  imageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+    backgroundColor: '#FFFFFF',
+    gap: 6,
+  },
+  imageButtonText: {
+    fontSize: 13,
+    color: AppTheme.primary,
+    fontWeight: '600',
+  },
+  imageRemoveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+    backgroundColor: '#FFFFFF',
+  },
+  imageRemoveText: {
+    fontSize: 13,
+    color: '#C62828',
+    fontWeight: '600',
+  },
+  newsImagePreview: {
+    width: '100%',
+    height: 180,
+    borderRadius: 12,
+    marginTop: 10,
+  },
 
   linkRow: {
     flexDirection: 'row',
@@ -941,6 +1401,39 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: AppTheme.primary,
     fontWeight: '600',
+  },
+  competitionChipsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 4,
+  },
+  competitionChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+    backgroundColor: '#FFFFFF',
+  },
+  competitionChipActive: {
+    backgroundColor: AppTheme.primary,
+    borderColor: AppTheme.primary,
+  },
+  competitionChipText: {
+    fontSize: 12,
+    color: AppTheme.textSecondary,
+    fontWeight: '600',
+  },
+  competitionChipTextActive: {
+    color: '#FFFFFF',
+  },
+  scoreRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 6,
+  },
+  scoreColumn: {
+    flex: 1,
   },
 
   // Modal
