@@ -137,7 +137,7 @@ function BottomTabsGroup() {
     <Tab.Navigator tabBar={(props) => <CustomTabBar {...props} />} screenOptions={{ headerShown: false }}>
       <Tab.Screen name="Inicio" component={HomeStackNavigator} options={{ tabBarLabel: 'Início' }} />
       <Tab.Screen name="Equipes" component={EquipesStackNavigator} options={{ tabBarLabel: 'Equipes' }} />
-      <Tab.Screen name="Competicoes" component={CompeticoesStackNavigator} options={{ tabBarLabel: 'Copas' }} />
+      <Tab.Screen name="Competicoes" component={CompeticoesStackNavigator} options={{ tabBarLabel: 'Competições' }} />
       <Tab.Screen name="Treinos" component={TreinosStackNavigator} options={{ tabBarLabel: 'Treinos' }} />
       <Tab.Screen name="Produtos" component={ProdutosStackNavigator} options={{ tabBarLabel: 'Loja' }} />
       

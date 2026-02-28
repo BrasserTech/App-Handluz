@@ -118,7 +118,11 @@ export default function HomeScreen() {
   }
 
   function handleNavigateToTeam(id: string, name: string) {
-    navigation.navigate('Equipes', { screen: 'EquipeAtletas', params: { equipeId: id, equipeNome: name } });
+    // Navega para a Tab "Equipes" e, dentro dela, para a tela "EquipeAtletas"
+    navigation.navigate('Equipes', {
+      screen: 'EquipeAtletas',
+      params: { equipeId: id, equipeNome: name },
+    });
   }
 
   async function handleOpenUrl(url?: string | null) {
@@ -132,7 +136,7 @@ export default function HomeScreen() {
 
   // --- RENDER ---
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 100 }}>
       {/* HEADER */}
       <View style={styles.eventCard}>
         <View style={styles.eventHeader}>

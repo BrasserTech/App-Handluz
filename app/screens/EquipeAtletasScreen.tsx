@@ -43,6 +43,7 @@ type Athlete = {
   nickname: string | null;
   birthdate: string | null;
   phone: string | null;
+  cpf_atleta?: string | null;
   email: string | null;
   image_url?: string | null;
   document_front_url?: string | null;
@@ -88,6 +89,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
   const [formNomeCompleto, setFormNomeCompleto] = useState('');
   const [formApelido, setFormApelido] = useState('');
   const [formTelefone, setFormTelefone] = useState('');
+  const [formCpf, setFormCpf] = useState('');
   const [formEmail, setFormEmail] = useState('');
 
   const [birthDigits, setBirthDigits] = useState('');   // apenas números
@@ -542,6 +544,14 @@ export default function EquipeAtletasScreen({ route }: Props) {
     return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
   }
 
+  function formatCPF(text: string): string {
+    const digits = text.replace(/\D/g, '').slice(0, 11);
+    if (digits.length <= 3) return digits;
+    if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`;
+    if (digits.length <= 9) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
+    return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+  }
+
   function handleBirthChange(text: string) {
     const digits = text.replace(/\D/g, '').slice(0, 8);
     setBirthDigits(digits);
@@ -570,7 +580,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
         supabase
           .from('athletes')
           .select(
-            'id, full_name, nickname, birthdate, phone, email, image_url, document_front_url, document_back_url, document_url'
+            'id, full_name, nickname, birthdate, phone, cpf_atleta, email, image_url, document_front_url, document_back_url, document_url'
           )
           .eq('team_id', equipeId)
           .order('full_name', { ascending: true }),
@@ -639,6 +649,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
     setFormNomeCompleto('');
     setFormApelido('');
     setFormTelefone('');
+    setFormCpf('');
     setFormEmail('');
     setBirthDigits('');
     setBirthDisplay('');
@@ -655,6 +666,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
     setFormNomeCompleto(atleta.full_name);
     setFormApelido(atleta.nickname ?? '');
     setFormTelefone(atleta.phone ?? '');
+    setFormCpf(atleta.cpf_atleta ? formatCPF(atleta.cpf_atleta) : '');
     setFormEmail(atleta.email ?? '');
 
     if (atleta.birthdate) {
@@ -704,10 +716,10 @@ export default function EquipeAtletasScreen({ route }: Props) {
       errors.email = 'Informe um e-mail válido (exemplo: email@exemplo.com).';
     }
 
-    // imagem é obrigatória apenas se não houver imagem anterior
-    if (!imagemAtleta && !editingAthlete?.image_url) {
-      errors.imagem = 'Selecione a imagem do atleta.';
-    }
+    // imagem é opcional
+    // if (!imagemAtleta && !editingAthlete?.image_url) {
+    //   errors.imagem = 'Selecione a imagem do atleta.';
+    // }
 
     if (birthDigits.length > 0 && birthDigits.length < 8) {
       errors.birthdate =
@@ -736,6 +748,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
         full_name: formNomeCompleto.trim(),
         nickname: formApelido.trim() || null,
         phone: formTelefone.trim(),
+        cpf_atleta: formCpf.trim() || null,
         email: formEmail.trim(),
         is_active: true,
       };
@@ -1319,6 +1332,17 @@ export default function EquipeAtletasScreen({ route }: Props) {
               <Text style={styles.errorText}>{fieldErrors.telefone}</Text>
             )}
 
+            {/* CPF */}
+            <Text style={styles.fieldLabel}>CPF (opcional)</Text>
+            <TextInput
+              style={styles.input}
+              value={formCpf}
+              onChangeText={text => setFormCpf(formatCPF(text))}
+              placeholder="000.000.000-00"
+              keyboardType="numeric"
+              maxLength={14}
+            />
+
             {/* Data de nascimento */}
             <Text style={styles.fieldLabel}>
               Data de nascimento (opcional, dd/mm/aaaa)
@@ -1366,7 +1390,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
             {/* Imagem do atleta */}
             <Text style={styles.fieldLabel}>
-              Imagem do atleta <Text style={styles.requiredStar}>*</Text>
+              Imagem do atleta (opcional)
             </Text>
             <View style={styles.imageRow}>
               <TouchableOpacity
