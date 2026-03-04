@@ -158,14 +158,7 @@ export default function AppNavigator() {
       <Stack.Screen 
         name="Profile" 
         component={ProfileOrLoginScreen} 
-        options={{
-          headerShown: true,
-          title: user ? 'Meu Perfil' : 'Acesse sua conta',
-          headerStyle: { backgroundColor: AppTheme.background },
-          headerTintColor: AppTheme.primary,
-          headerTitleStyle: { color: AppTheme.textPrimary },
-          headerBackTitle: '', 
-        }}
+        options={{ headerShown: false }}
       />
     </Stack.Navigator>
   );
