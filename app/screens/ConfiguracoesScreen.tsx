@@ -13,6 +13,7 @@ import {
   Alert,
   Linking,
   Image,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -632,6 +633,34 @@ export default function DiretoriaScreen() {
   }
 
   async function handleDeleteNews(item: NewsItem) {
+    const canUseWebConfirm =
+      Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.confirm === 'function';
+
+    if (canUseWebConfirm) {
+      const confirmed = window.confirm(
+        `Tem certeza de que deseja excluir "${item.title}"?`
+      );
+      if (!confirmed) return;
+
+      try {
+        const { error } = await supabase
+          .from('news')
+          .delete()
+          .eq('id', item.id);
+
+        if (error) {
+          console.error('[Noticias] Erro ao excluir notícia:', error.message);
+          Alert.alert('Erro', 'Não foi possível excluir a notícia.');
+          return;
+        }
+        await loadData();
+      } catch (err) {
+        console.error('[Noticias] Erro inesperado ao excluir notícia:', err);
+        Alert.alert('Erro', 'Ocorreu um erro ao excluir a notícia.');
+      }
+      return;
+    }
+
     Alert.alert(
       'Excluir notícia',
       `Tem certeza de que deseja excluir "${item.title}"?`,
