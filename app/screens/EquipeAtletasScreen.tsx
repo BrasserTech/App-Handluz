@@ -211,20 +211,21 @@ export default function EquipeAtletasScreen({ route }: Props) {
         return;
       }
 
-      // Verificar se o tipo é success
-      if (result.type === 'success') {
-        const uri = result.uri || (result as any).fileUri;
-        if (uri) {
-          console.log('[EquipeAtletasScreen] PDF selecionado com sucesso:', uri);
-          setPDF({ uri });
-        } else {
-          console.error('[EquipeAtletasScreen] URI não encontrada no resultado:', result);
-          Alert.alert('Erro', 'Não foi possível obter o caminho do arquivo selecionado.');
-        }
-      } else {
-        console.warn('[EquipeAtletasScreen] Resultado inesperado:', result);
-        Alert.alert('Aviso', 'Não foi possível processar o arquivo selecionado.');
+      const assetUri =
+        'assets' in result
+          ? result.assets?.[0]?.uri
+          : 'uri' in result
+            ? (result as any).uri
+            : undefined;
+
+      if (assetUri) {
+        console.log('[EquipeAtletasScreen] PDF selecionado com sucesso:', assetUri);
+        setPDF({ uri: assetUri });
+        return;
       }
+
+      console.warn('[EquipeAtletasScreen] Resultado inesperado:', result);
+      Alert.alert('Aviso', 'Não foi possível processar o arquivo selecionado.');
     } catch (err) {
       console.error('[EquipeAtletasScreen] Erro ao selecionar PDF:', err);
       Alert.alert('Erro', `Não foi possível selecionar o arquivo PDF: ${err instanceof Error ? err.message : 'Erro desconhecido'}`);
@@ -707,12 +708,8 @@ export default function EquipeAtletasScreen({ route }: Props) {
     if (!formNomeCompleto.trim()) {
       errors.nome = 'Informe o nome completo do atleta.';
     }
-    if (!formTelefone.trim()) {
-      errors.telefone = 'Informe um telefone de contato.';
-    }
-    if (!formEmail.trim()) {
-      errors.email = 'Informe um e-mail válido.';
-    } else if (!validarEmail(formEmail)) {
+
+    if (formEmail.trim() && !validarEmail(formEmail)) {
       errors.email = 'Informe um e-mail válido (exemplo: email@exemplo.com).';
     }
 
@@ -721,9 +718,11 @@ export default function EquipeAtletasScreen({ route }: Props) {
     //   errors.imagem = 'Selecione a imagem do atleta.';
     // }
 
-    if (birthDigits.length > 0 && birthDigits.length < 8) {
+    if (birthDigits.length === 0) {
+      errors.birthdate = 'Informe a data de nascimento (dd/mm/aaaa).';
+    } else if (birthDigits.length < 8) {
       errors.birthdate =
-        'Complete a data de nascimento (dd/mm/aaaa) ou deixe em branco.';
+        'Complete a data de nascimento (dd/mm/aaaa).';
     }
 
     setFieldErrors(errors);
@@ -747,9 +746,9 @@ export default function EquipeAtletasScreen({ route }: Props) {
       const basePayload: any = {
         full_name: formNomeCompleto.trim(),
         nickname: formApelido.trim() || null,
-        phone: formTelefone.trim(),
+        phone: formTelefone.trim() || null,
         cpf_atleta: formCpf.trim() || null,
-        email: formEmail.trim(),
+        email: formEmail.trim() || null,
         is_active: true,
       };
 
@@ -1307,9 +1306,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
             />
 
             {/* Telefone */}
-            <Text style={styles.fieldLabel}>
-              Telefone <Text style={styles.requiredStar}>*</Text>
-            </Text>
+            <Text style={styles.fieldLabel}>Telefone (opcional)</Text>
             <TextInput
               style={[
                 styles.input,
@@ -1345,7 +1342,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
             {/* Data de nascimento */}
             <Text style={styles.fieldLabel}>
-              Data de nascimento (opcional, dd/mm/aaaa)
+              Data de nascimento <Text style={styles.requiredStar}>*</Text>
             </Text>
             <TextInput
               style={[
@@ -1362,9 +1359,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
             )}
 
             {/* E-mail */}
-            <Text style={styles.fieldLabel}>
-              E-mail <Text style={styles.requiredStar}>*</Text>
-            </Text>
+            <Text style={styles.fieldLabel}>E-mail (opcional)</Text>
             <TextInput
               style={[
                 styles.input,

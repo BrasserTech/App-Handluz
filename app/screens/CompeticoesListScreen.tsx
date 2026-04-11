@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 
 import { AppTheme } from '../../constants/theme';
 import { supabase } from '../services/supabaseClient';
@@ -45,7 +45,9 @@ type Match = {
   away_team: string;
   score_home: number | null;
   score_away: number | null;
+  match_date: string | null;
   match_time: string | null;
+  location: string | null;
   youtube_link: string | null;
   round: string | null;
 };
@@ -60,6 +62,8 @@ type AthleteSelection = {
 };
 
 export default function CompeticoesListScreen() {
+  const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const { isDiretoriaOrAdmin } = usePermissions();
   const insets = useSafeAreaInsets();
   const TAB_BAR_HEIGHT = 80;
@@ -100,8 +104,12 @@ export default function CompeticoesListScreen() {
   const [matchAway, setMatchAway] = useState('');
   const [matchScoreHome, setMatchScoreHome] = useState('');
   const [matchScoreAway, setMatchScoreAway] = useState('');
+  const [matchRound, setMatchRound] = useState('');
+  const [matchDate, setMatchDate] = useState('');
   const [matchTime, setMatchTime] = useState('');
+  const [matchLocation, setMatchLocation] = useState('');
   const [matchLink, setMatchLink] = useState('');
+  const [matchesRoundFilter, setMatchesRoundFilter] = useState('');
 
   // --- ESTADOS CONVOCAÇÃO ---
   const [athletesModalVisible, setAthletesModalVisible] = useState(false);
@@ -112,6 +120,17 @@ export default function CompeticoesListScreen() {
   // Filtros Convocação
   const [athleteSearch, setAthleteSearch] = useState('');
   const [athleteCategoryFilter, setAthleteCategoryFilter] = useState('');
+
+  const openMatchesManagerRef = useRef<(competitionId: string) => void>(() => undefined);
+  const openAthletesManagerRef = useRef<(competitionId: string) => void>(() => undefined);
+
+  openMatchesManagerRef.current = (competitionId: string) => {
+    openMatchesManager(competitionId);
+  };
+
+  openAthletesManagerRef.current = (competitionId: string) => {
+    openAthletesManager(competitionId, true);
+  };
 
   // ==================== CARREGAMENTO ====================
 
@@ -135,7 +154,21 @@ export default function CompeticoesListScreen() {
   useFocusEffect(
     useCallback(() => {
       loadCompetitions();
-    }, [])
+
+      const params = route.params as
+        | { openCompetitionId?: string; openSection?: 'matches' | 'athletes' }
+        | undefined;
+
+      if (params?.openCompetitionId && params?.openSection) {
+        if (params.openSection === 'matches') {
+          openMatchesManagerRef.current(params.openCompetitionId);
+        } else {
+          openAthletesManagerRef.current(params.openCompetitionId);
+        }
+
+        navigation.setParams({ openCompetitionId: undefined, openSection: undefined });
+      }
+    }, [loadCompetitions, navigation, route.params])
   );
 
   const onRefresh = async () => {
@@ -188,21 +221,31 @@ export default function CompeticoesListScreen() {
     setMatchAway('');
     setMatchScoreHome('');
     setMatchScoreAway('');
+    setMatchRound('');
+    setMatchDate('');
     setMatchTime('');
+    setMatchLocation('');
     setMatchLink('');
+    setMatchesRoundFilter('');
   }
 
-  async function loadMatches(compId: string) {
+  async function loadMatches(compId: string, roundFilter?: string) {
     setLoadingMatches(true);
     try {
-      const { data, error } = await supabase
+      const appliedRoundFilter = (roundFilter ?? matchesRoundFilter).trim();
+      let query = supabase
         .from('matches')
         .select('*')
-        .eq('competition_id', compId)
-        .order('created_at', { ascending: false }); // Ordenar: Criados recentemente primeiro
+        .eq('competition_id', compId);
+
+      if (appliedRoundFilter) {
+        query = query.eq('round', appliedRoundFilter);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
       setMatchesList(data || []);
-    } catch (err) {
+    } catch {
       Alert.alert('Erro', 'Falha ao carregar jogos.');
     } finally {
       setLoadingMatches(false);
@@ -233,9 +276,11 @@ export default function CompeticoesListScreen() {
         away_team: matchAway,
         score_home: isNaN(sHome) ? 0 : sHome,
         score_away: isNaN(sAway) ? 0 : sAway,
+        round: matchRound.trim() || null,
+        match_date: parseDateToISO(matchDate),
         match_time: matchTime || null,
+        location: matchLocation || null,
         youtube_link: matchLink || null,
-        // match_date não é enviado, deixando o banco assumir NULL
       };
 
       console.log("Enviando Payload Jogo:", payload); 
@@ -251,7 +296,10 @@ export default function CompeticoesListScreen() {
       setMatchAway('');
       setMatchScoreHome('');
       setMatchScoreAway('');
+      setMatchRound('');
+      setMatchDate('');
       setMatchTime('');
+      setMatchLocation('');
       setMatchLink('');
       
       loadMatches(editingId);
@@ -307,7 +355,7 @@ export default function CompeticoesListScreen() {
       }));
 
       setAthletesList(mapped);
-    } catch (err) {
+    } catch {
       Alert.alert('Atenção', 'Erro ao carregar lista de atletas.');
     } finally {
       setLoadingAthletes(false);
@@ -652,9 +700,42 @@ export default function CompeticoesListScreen() {
                     <Text style={styles.miniLabel}>Placar</Text>
                     <TextInput style={[styles.gameInput, { textAlign: 'center' }]} keyboardType="numeric" value={matchScoreAway} onChangeText={setMatchScoreAway} placeholder="0" />
                   </View>
+                  <View style={{ width: 70, marginLeft: 15 }}>
+                    <Text style={styles.miniLabel}>Etapa</Text>
+                    <TextInput
+                      style={styles.gameInput}
+                      value={matchRound}
+                      onChangeText={setMatchRound}
+                      placeholder="1"
+                      keyboardType="numeric"
+                    />
+                  </View>
                   <View style={{ flex: 1, marginLeft: 15 }}>
                     <Text style={styles.miniLabel}>Horário</Text>
                     <TextInput style={styles.gameInput} value={matchTime} onChangeText={setMatchTime} placeholder="19:00" />
+                  </View>
+                </View>
+
+                <View style={[styles.teamsRow, { marginTop: 10 }]}>
+                  <View style={{ width: 120 }}>
+                    <Text style={styles.miniLabel}>Dia</Text>
+                    <TextInput
+                      style={styles.gameInput}
+                      value={matchDate}
+                      onChangeText={(t) => handleDateChange(t, setMatchDate)}
+                      placeholder="dd/mm/aaaa"
+                      keyboardType="numeric"
+                      maxLength={10}
+                    />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 15 }}>
+                    <Text style={styles.miniLabel}>Local</Text>
+                    <TextInput
+                      style={styles.gameInput}
+                      value={matchLocation}
+                      onChangeText={setMatchLocation}
+                      placeholder="Ginásio / Cidade"
+                    />
                   </View>
                 </View>
 
@@ -676,39 +757,79 @@ export default function CompeticoesListScreen() {
 
             {/* LISTA DE JOGOS */}
             {loadingMatches ? <ActivityIndicator color={AppTheme.primary} style={{ marginTop: 20 }} /> : (
-              <FlatList
-                data={matchesList}
-                keyExtractor={item => item.id}
-                contentContainerStyle={{ paddingBottom: 20 }}
-                renderItem={({ item }) => (
-                  <View style={styles.matchCard}>
-                    <View style={styles.matchCardHeader}>
-                      <Text style={styles.matchTime}>{item.match_time || 'Horário indefinido'}</Text>
-                      {item.youtube_link ? (
-                        <TouchableOpacity onPress={() => openLink(item.youtube_link)} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <Ionicons name="logo-youtube" size={16} color="#FF0000" />
-                          <Text style={{ fontSize: 10, color: '#FF0000', marginLeft: 4, fontWeight: 'bold' }}>ASSISTIR</Text>
-                        </TouchableOpacity>
-                      ) : null}
-                    </View>
-                    
-                    <View style={styles.matchScoreRow}>
-                      <Text style={[styles.matchTeamName, { textAlign: 'right' }]} numberOfLines={1}>{item.home_team}</Text>
-                      <View style={styles.scoreBadge}><Text style={styles.scoreValue}>{item.score_home ?? '-'}</Text></View>
-                      <Text style={{ marginHorizontal: 6, color: '#999', fontSize: 12 }}>X</Text>
-                      <View style={styles.scoreBadge}><Text style={styles.scoreValue}>{item.score_away ?? '-'}</Text></View>
-                      <Text style={[styles.matchTeamName, { textAlign: 'left' }]} numberOfLines={1}>{item.away_team}</Text>
-                    </View>
-
-                    {isDiretoriaOrAdmin && (
-                      <TouchableOpacity onPress={() => handleDeleteMatch(item.id)} style={styles.deleteMatchBtn}>
-                        <Ionicons name="trash-outline" size={16} color="#D32F2F" />
-                      </TouchableOpacity>
-                    )}
+              <>
+                <View style={styles.matchesFilterRow}>
+                  <View style={[styles.searchWrapper, { backgroundColor: '#FAFAFA', borderWidth: 1, borderColor: '#EEE', height: 36 }]}>
+                    <Ionicons name="funnel-outline" size={16} color="#999" style={styles.searchIcon} />
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="Etapa..."
+                      value={matchesRoundFilter}
+                      onChangeText={(t) => {
+                        setMatchesRoundFilter(t);
+                        if (editingId) loadMatches(editingId, t);
+                      }}
+                      keyboardType="numeric"
+                    />
                   </View>
-                )}
-                ListEmptyComponent={<Text style={styles.emptyText}>Nenhum jogo registrado.</Text>}
-              />
+                  <TouchableOpacity
+                    style={styles.clearFilterBtn}
+                    onPress={() => {
+                      setMatchesRoundFilter('');
+                      if (editingId) loadMatches(editingId, '');
+                    }}
+                  >
+                    <Text style={styles.clearFilterText}>Limpar</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <FlatList
+                  data={matchesList}
+                  keyExtractor={item => item.id}
+                  contentContainerStyle={{ paddingBottom: 20 }}
+                  renderItem={({ item }) => (
+                    <View style={styles.matchCard}>
+                      <View style={styles.matchCardHeader}>
+                        <Text style={styles.matchTime}>
+                          {(item.round ? `Etapa ${item.round} • ` : '') +
+                            (item.match_date ? `${formatDateToBr(item.match_date)} • ` : '') +
+                            (item.match_time || 'Horário indefinido')}
+                        </Text>
+                        {item.youtube_link ? (
+                          <TouchableOpacity onPress={() => openLink(item.youtube_link)} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Ionicons name="logo-youtube" size={16} color="#FF0000" />
+                            <Text style={{ fontSize: 10, color: '#FF0000', marginLeft: 4, fontWeight: 'bold' }}>ASSISTIR</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+
+                      {item.location ? (
+                        <View style={styles.matchMetaRow}>
+                          <Ionicons name="location-outline" size={14} color="#777" />
+                          <Text style={styles.matchMetaText} numberOfLines={1}>
+                            {item.location}
+                          </Text>
+                        </View>
+                      ) : null}
+                      
+                      <View style={styles.matchScoreRow}>
+                        <Text style={[styles.matchTeamName, { textAlign: 'right' }]} numberOfLines={1}>{item.home_team}</Text>
+                        <View style={styles.scoreBadge}><Text style={styles.scoreValue}>{item.score_home ?? '-'}</Text></View>
+                        <Text style={{ marginHorizontal: 6, color: '#999', fontSize: 12 }}>X</Text>
+                        <View style={styles.scoreBadge}><Text style={styles.scoreValue}>{item.score_away ?? '-'}</Text></View>
+                        <Text style={[styles.matchTeamName, { textAlign: 'left' }]} numberOfLines={1}>{item.away_team}</Text>
+                      </View>
+
+                      {isDiretoriaOrAdmin && (
+                        <TouchableOpacity onPress={() => handleDeleteMatch(item.id)} style={styles.deleteMatchBtn}>
+                          <Ionicons name="trash-outline" size={16} color="#D32F2F" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
+                  ListEmptyComponent={<Text style={styles.emptyText}>Nenhum jogo registrado.</Text>}
+                />
+              </>
             )}
           </View>
         </KeyboardAvoidingView>
@@ -812,6 +933,9 @@ const styles = StyleSheet.create({
   searchWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F2F4F6', borderRadius: 20, paddingHorizontal: 12, height: 40 },
   searchIcon: { marginRight: 6 },
   searchInput: { flex: 1, fontSize: 14, color: '#333' },
+  matchesFilterRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  clearFilterBtn: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: '#EEE', backgroundColor: '#FAFAFA' },
+  clearFilterText: { fontSize: 12, fontWeight: '600', color: '#666' },
 
   // Cards
   card: { backgroundColor: '#FFF', borderRadius: 16, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 3, overflow: 'hidden' },
@@ -869,6 +993,8 @@ const styles = StyleSheet.create({
   matchCard: { backgroundColor: '#FFF', borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#EEE', shadowColor: "#000", shadowOpacity: 0.03, shadowRadius: 3, elevation: 2 },
   matchCardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   matchTime: { fontSize: 12, fontWeight: 'bold', color: '#555', backgroundColor: '#F0F0F0', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  matchMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: -4, marginBottom: 8, gap: 6 },
+  matchMetaText: { fontSize: 12, color: '#777', flex: 1 },
   matchScoreRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
   matchTeamName: { flex: 1, fontSize: 14, fontWeight: '600', color: '#333' },
   scoreBadge: { backgroundColor: '#222', borderRadius: 6, width: 34, height: 30, justifyContent: 'center', alignItems: 'center' },

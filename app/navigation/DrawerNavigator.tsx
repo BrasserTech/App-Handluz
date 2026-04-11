@@ -42,7 +42,6 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
       <DrawerItem
         label="Início"
         labelStyle={styles.drawerLabel}
-        iconStyle={styles.drawerIcon}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Inicio' })}
         icon={({ size, color }) => (
           <View style={styles.iconWrapper}>
@@ -52,13 +51,12 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
       />
 
       <DrawerItem
-        label="Atletas"
+        label="Competições"
         labelStyle={styles.drawerLabel}
-        iconStyle={styles.drawerIcon}
-        onPress={() => props.navigation.navigate('AppTabs', { screen: 'Atletas' })}
+        onPress={() => props.navigation.navigate('AppTabs', { screen: 'Competicoes' })}
         icon={({ size, color }) => (
           <View style={styles.iconWrapper}>
-            <Ionicons name="people-outline" color={color ?? '#FFF'} size={size ?? 20} />
+            <Ionicons name="trophy-outline" color={color ?? '#FFF'} size={size ?? 20} />
           </View>
         )}
       />
@@ -66,7 +64,6 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
       <DrawerItem
         label="Equipes"
         labelStyle={styles.drawerLabel}
-        iconStyle={styles.drawerIcon}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Equipes' })}
         icon={({ size, color }) => (
           <View style={styles.iconWrapper}>
@@ -82,7 +79,6 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
       <DrawerItem
         label="Treinos"
         labelStyle={styles.drawerLabel}
-        iconStyle={styles.drawerIcon}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Treinos' })}
         icon={({ size, color }) => (
           <View style={styles.iconWrapper}>
@@ -94,7 +90,6 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
       <DrawerItem
         label="Produtos"
         labelStyle={styles.drawerLabel}
-        iconStyle={styles.drawerIcon}
         onPress={() => props.navigation.navigate('AppTabs', { screen: 'Produtos' })}
         icon={({ size, color }) => (
           <View style={styles.iconWrapper}>
@@ -104,13 +99,12 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
       />
 
       <DrawerItem
-        label="Diretoria"
+        label="Configurações"
         labelStyle={styles.drawerLabel}
-        iconStyle={styles.drawerIcon}
-        onPress={() => props.navigation.navigate('AppTabs', { screen: 'Diretoria' })}
+        onPress={() => props.navigation.navigate('AppTabs', { screen: 'Configuracoes' })}
         icon={({ size, color }) => (
           <View style={styles.iconWrapper}>
-            <Ionicons name="business-outline" color={color ?? '#FFF'} size={size ?? 20} />
+            <Ionicons name="settings-outline" color={color ?? '#FFF'} size={size ?? 20} />
           </View>
         )}
       />

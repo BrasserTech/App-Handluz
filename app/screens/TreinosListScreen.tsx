@@ -66,8 +66,8 @@ type VacationPeriod = {
 };
 
 type FieldErrors = {
-  title?: string;
   date?: string;
+  startTime?: string;
 };
 
 type Athlete = {
@@ -507,8 +507,22 @@ export default function TreinosListScreen() {
 
   function validateForm(): boolean {
     const errors: FieldErrors = {};
-    if (!formTitle.trim()) errors.title = 'Informe o título.';
-    if (!getDateIsoFromDigits(formDateDigits)) errors.date = 'Data inválida.';
+
+    const iso = getDateIsoFromDigits(formDateDigits);
+    if (!iso) errors.date = 'Data inválida.';
+
+    const time = formStartTime.trim();
+    if (!time) {
+      errors.startTime = 'Informe o horário inicial.';
+    } else {
+      const match = time.match(/^(\d{1,2}):(\d{2})$/);
+      const hh = match ? Number(match[1]) : NaN;
+      const mm = match ? Number(match[2]) : NaN;
+      if (!match || Number.isNaN(hh) || Number.isNaN(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+        errors.startTime = 'Horário inválido (HH:MM).';
+      }
+    }
+
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
   }
@@ -519,12 +533,15 @@ export default function TreinosListScreen() {
 
     const isoDate = getDateIsoFromDigits(formDateDigits)!;
     const durationInt = parseInt(formDurationMinutes.replace(/\D/g, ''), 10);
+    const safeTitle =
+      formTitle.trim() ||
+      `Treino ${formDateDisplay}${formStartTime.trim() ? ` ${formStartTime.trim()}` : ''}`;
     const basePayload: Partial<Training> = {
       team_id: selectedTeamId,
-      title: formTitle.trim(),
+      title: safeTitle,
       description: formDescription.trim() || null,
       training_date: isoDate,
-      start_time: formStartTime.trim() || null,
+      start_time: formStartTime.trim(),
       duration_minutes: durationInt > 0 ? durationInt : 60,
       location: formLocation.trim() || null,
     };
@@ -816,16 +833,25 @@ export default function TreinosListScreen() {
          <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
                <Text style={styles.modalTitle}>{editingTraining ? 'Editar Treino' : 'Novo Treino'}</Text>
-               <Text style={styles.fieldLabel}>Título <Text style={styles.requiredStar}>*</Text></Text>
-               <TextInput style={[styles.input, fieldErrors.title ? styles.inputError : null]} value={formTitle} onChangeText={t => { setFormTitle(t); if(fieldErrors.title) setFieldErrors(prev=>({...prev, title:undefined})) }} placeholder="Ex.: Treino tático..." />
-               {fieldErrors.title && <Text style={styles.errorText}>{fieldErrors.title}</Text>}
+               <Text style={styles.fieldLabel}>Título (opcional)</Text>
+               <TextInput style={styles.input} value={formTitle} onChangeText={setFormTitle} placeholder="Ex.: Treino tático..." />
                
                <Text style={styles.fieldLabel}>Data (dd/mm/aaaa) <Text style={styles.requiredStar}>*</Text></Text>
                <TextInput style={[styles.input, fieldErrors.date ? styles.inputError : null]} value={formDateDisplay} onChangeText={handleDateChange} keyboardType="number-pad" placeholder="__/__/____" />
                {fieldErrors.date && <Text style={styles.errorText}>{fieldErrors.date}</Text>}
 
-               <Text style={styles.fieldLabel}>Horário inicial</Text>
-               <TextInput style={styles.input} value={formStartTime} onChangeText={t => setFormStartTime(maskTime(t))} placeholder="HH:MM" keyboardType="number-pad" />
+               <Text style={styles.fieldLabel}>Horário inicial <Text style={styles.requiredStar}>*</Text></Text>
+               <TextInput
+                 style={[styles.input, fieldErrors.startTime ? styles.inputError : null]}
+                 value={formStartTime}
+                 onChangeText={t => {
+                   setFormStartTime(maskTime(t));
+                   if (fieldErrors.startTime) setFieldErrors(prev => ({ ...prev, startTime: undefined }));
+                 }}
+                 placeholder="HH:MM"
+                 keyboardType="number-pad"
+               />
+               {fieldErrors.startTime && <Text style={styles.errorText}>{fieldErrors.startTime}</Text>}
 
                <Text style={styles.fieldLabel}>Duração (minutos)</Text>
                <TextInput style={styles.input} value={formDurationMinutes} onChangeText={setFormDurationMinutes} placeholder="60" keyboardType="number-pad" />

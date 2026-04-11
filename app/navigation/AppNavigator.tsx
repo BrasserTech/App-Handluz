@@ -18,7 +18,6 @@ import ConfiguracoesStackNavigator from './ConfiguracoesStackNavigator';
 import ProfileOrLoginScreen from './ProfileOrLoginScreen'; // Verifique se o caminho está certo
 
 import { AppTheme } from '../../constants/theme';
-import { useAuth } from '../context/AuthContext';
 
 // --- TIPAGEM ---
 export type BottomTabParamList = {
@@ -64,7 +63,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       duration: 250,
       easing: Easing.out(Easing.quad),
     });
-  }, [activeIndex, tabWidth]);
+  }, [activeIndex, tabWidth, translateX]);
 
   const animatedIndicatorStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
@@ -133,8 +132,14 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 
 // --- GRUPO DE ABAS ---
 function BottomTabsGroup() {
+  const insets = useSafeAreaInsets();
+  const tabBarHeight = 66 + insets.bottom;
+
   return (
-    <Tab.Navigator tabBar={(props) => <CustomTabBar {...props} />} screenOptions={{ headerShown: false }}>
+    <Tab.Navigator
+      tabBar={(props) => <CustomTabBar {...props} />}
+      screenOptions={{ headerShown: false, sceneStyle: { paddingBottom: tabBarHeight } }}
+    >
       <Tab.Screen name="Inicio" component={HomeStackNavigator} options={{ tabBarLabel: 'Início' }} />
       <Tab.Screen name="Equipes" component={EquipesStackNavigator} options={{ tabBarLabel: 'Equipes' }} />
       <Tab.Screen name="Competicoes" component={CompeticoesStackNavigator} options={{ tabBarLabel: 'Competições' }} />
@@ -149,8 +154,6 @@ function BottomTabsGroup() {
 
 // --- ROOT NAVIGATOR ---
 export default function AppNavigator() {
-  const { user } = useAuth();
-
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="AppTabs" component={BottomTabsGroup} />

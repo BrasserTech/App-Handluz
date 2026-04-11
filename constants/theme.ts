@@ -52,3 +52,22 @@ export const AppTheme = {
   ...AppColors,
   fonts: Fonts,
 };
+
+export const Colors = {
+  light: {
+    text: AppTheme.textPrimary,
+    background: AppTheme.background,
+    tint: AppTheme.primary,
+    icon: AppTheme.textSecondary,
+    tabIconDefault: AppTheme.tabIconDefault,
+    tabIconSelected: AppTheme.tabIconSelected,
+  },
+  dark: {
+    text: '#FFFFFF',
+    background: '#0B0F12',
+    tint: AppTheme.primaryLight,
+    icon: '#D1D5DB',
+    tabIconDefault: '#9CA3AF',
+    tabIconSelected: AppTheme.primaryLight,
+  },
+};

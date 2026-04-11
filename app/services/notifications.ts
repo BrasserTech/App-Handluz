@@ -1,6 +1,5 @@
 // app/services/notifications.ts
 import { Platform } from 'react-native';
-import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { supabase } from './supabaseClient';
@@ -8,7 +7,8 @@ import { supabase } from './supabaseClient';
 // Configura o comportamento das notificações recebidas enquanto o app está aberto
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: false,
     shouldSetBadge: false,
   }),
@@ -24,8 +24,8 @@ export async function registerForPushNotificationsAsync(
   profileId: string | null
 ): Promise<void> {
   try {
-    if (!Device.isDevice) {
-      console.log('[notifications] Notificações só funcionam em dispositivo físico.');
+    if (Platform.OS === 'web') {
+      console.log('[notifications] Push não é suportado no web.');
       return;
     }
 
