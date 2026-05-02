@@ -1,9 +1,10 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
+  SectionList,
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
@@ -30,6 +31,7 @@ type Competition = {
   title: string;
   location: string | null;
   category: string | null;
+  gender: string | null;
   start_date: string | null;
   end_date: string | null;
   status: 'agendado' | 'em_andamento' | 'encerrado';
@@ -61,6 +63,11 @@ type AthleteSelection = {
   selected: boolean;
 };
 
+const CATEGORY_OPTIONS = ['Mirim', 'Infantil', 'Cadete', 'Juvenil', 'Junior', 'Adulto', 'Master', 'Areia'];
+const GENDER_OPTIONS = ['Masculino', 'Feminino', 'Misto'];
+const UNCATEGORIZED_LABEL = 'Sem categoria';
+const UNGENDERED_LABEL = 'Sem gênero';
+
 export default function CompeticoesListScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -86,12 +93,16 @@ export default function CompeticoesListScreen() {
   const [formTitle, setFormTitle] = useState('');
   const [formLocation, setFormLocation] = useState('');
   const [formCategoryComp, setFormCategoryComp] = useState('');
+  const [formGender, setFormGender] = useState('');
   const [formStartDate, setFormStartDate] = useState('');
   const [formEndDate, setFormEndDate] = useState('');
   const [formStatus, setFormStatus] = useState<'agendado' | 'em_andamento' | 'encerrado'>('agendado');
   const [formYoutube, setFormYoutube] = useState('');
   const [formPlacement, setFormPlacement] = useState('');
   const [formDesc, setFormDesc] = useState('');
+  const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
+  const [categoryPickerMode, setCategoryPickerMode] = useState<'form' | 'filter'>('form');
+  const [genderPickerVisible, setGenderPickerVisible] = useState(false);
 
   // --- ESTADOS MODAL JOGOS ---
   const [matchesModalVisible, setMatchesModalVisible] = useState(false);
@@ -177,12 +188,72 @@ export default function CompeticoesListScreen() {
     setRefreshing(false);
   };
 
+  const categoryFilterOptions = useMemo(() => {
+    const savedCategories = competitions
+      .map(comp => comp.category?.trim())
+      .filter((category): category is string => Boolean(category));
+
+    return Array.from(new Set([...CATEGORY_OPTIONS, ...savedCategories])).sort((a, b) => {
+      const orderA = CATEGORY_OPTIONS.indexOf(a);
+      const orderB = CATEGORY_OPTIONS.indexOf(b);
+      if (orderA >= 0 && orderB >= 0) return orderA - orderB;
+      if (orderA >= 0) return -1;
+      if (orderB >= 0) return 1;
+      return a.localeCompare(b, 'pt-BR');
+    });
+  }, [competitions]);
+
   // Filtro Cascata
   const filteredCompetitions = competitions.filter(comp => {
     const matchName = comp.title.toLowerCase().includes(filterName.toLowerCase());
-    const matchCat = filterCategory ? comp.category?.toLowerCase().includes(filterCategory.toLowerCase()) : true;
+    const matchCat = filterCategory ? comp.category?.toLowerCase() === filterCategory.toLowerCase() : true;
     return matchName && matchCat;
   });
+
+  const groupedCompetitions = useMemo(() => {
+    const groups = filteredCompetitions.reduce<Record<string, { category: string; gender: string; data: Competition[] }>>((acc, comp) => {
+      const category = comp.category?.trim() || UNCATEGORIZED_LABEL;
+      const gender = comp.gender?.trim() || UNGENDERED_LABEL;
+      const key = `${category}::${gender}`;
+      if (!acc[key]) acc[key] = { category, gender, data: [] };
+      acc[key].data.push(comp);
+      return acc;
+    }, {});
+
+    let lastCategory = '';
+
+    return Object.values(groups)
+      .sort((groupA, groupB) => {
+        const orderA = CATEGORY_OPTIONS.indexOf(groupA.category);
+        const orderB = CATEGORY_OPTIONS.indexOf(groupB.category);
+        if (groupA.category === UNCATEGORIZED_LABEL) return 1;
+        if (groupB.category === UNCATEGORIZED_LABEL) return -1;
+        if (orderA >= 0 && orderB >= 0) return orderA - orderB;
+        if (orderA >= 0) return -1;
+        if (orderB >= 0) return 1;
+        const categoryOrder = groupA.category.localeCompare(groupB.category, 'pt-BR');
+        if (categoryOrder !== 0) return categoryOrder;
+
+        const genderOrderA = GENDER_OPTIONS.indexOf(groupA.gender);
+        const genderOrderB = GENDER_OPTIONS.indexOf(groupB.gender);
+        if (groupA.gender === UNGENDERED_LABEL) return 1;
+        if (groupB.gender === UNGENDERED_LABEL) return -1;
+        if (genderOrderA >= 0 && genderOrderB >= 0) return genderOrderA - genderOrderB;
+        if (genderOrderA >= 0) return -1;
+        if (genderOrderB >= 0) return 1;
+        return groupA.gender.localeCompare(groupB.gender, 'pt-BR');
+      })
+      .map(group => {
+        const showCategory = group.category !== lastCategory;
+        lastCategory = group.category;
+        return {
+          title: group.category,
+          gender: group.gender,
+          data: group.data,
+          showCategory,
+        };
+      });
+  }, [filteredCompetitions]);
 
   // ==================== HELPERS ====================
   const handleDateChange = (text: string, setter: (v: string) => void) => {
@@ -208,6 +279,22 @@ export default function CompeticoesListScreen() {
   }
   function openLink(url: string | null) {
     if (url) Linking.openURL(url).catch(() => Alert.alert('Erro', 'Link inválido.'));
+  }
+  function openCategoryPicker(mode: 'form' | 'filter') {
+    setCategoryPickerMode(mode);
+    setCategoryPickerVisible(true);
+  }
+  function handleSelectCategory(category: string) {
+    if (categoryPickerMode === 'form') {
+      setFormCategoryComp(category);
+    } else {
+      setFilterCategory(category);
+    }
+    setCategoryPickerVisible(false);
+  }
+  function handleSelectGender(gender: string) {
+    setFormGender(gender);
+    setGenderPickerVisible(false);
   }
 
   // ==================== JOGOS (MATCHES) ====================
@@ -400,6 +487,7 @@ export default function CompeticoesListScreen() {
       setFormTitle(competition.title);
       setFormLocation(competition.location || '');
       setFormCategoryComp(competition.category || '');
+      setFormGender(competition.gender || '');
       setFormStartDate(formatDateToBr(competition.start_date));
       setFormEndDate(formatDateToBr(competition.end_date));
       setFormStatus(competition.status);
@@ -411,6 +499,7 @@ export default function CompeticoesListScreen() {
       setFormTitle('');
       setFormLocation('');
       setFormCategoryComp('');
+      setFormGender('');
       setFormStartDate('');
       setFormEndDate('');
       setFormStatus('agendado');
@@ -432,6 +521,7 @@ export default function CompeticoesListScreen() {
         title: formTitle.trim(),
         location: formLocation.trim() || null,
         category: formCategoryComp.trim() || null,
+        gender: formGender.trim() || null,
         start_date: parseDateToISO(formStartDate),
         end_date: parseDateToISO(formEndDate),
         status: formStatus,
@@ -502,6 +592,12 @@ export default function CompeticoesListScreen() {
                     • {item.category}
                   </Text>
                 ) : null}
+
+                {item.gender ? (
+                  <Text style={[styles.cardSubtitle, styles.genderMetaText]}>
+                    • {item.gender}
+                  </Text>
+                ) : null}
               </View>
             </View>
 
@@ -568,24 +664,42 @@ export default function CompeticoesListScreen() {
             onChangeText={setFilterName}
           />
         </View>
-        <View style={[styles.searchWrapper, { width: 130, marginLeft: 10 }]}>
-          <Ionicons name="search" size={18} color="#999" style={styles.searchIcon} />
-          <TextInput 
-            style={styles.searchInput} 
-            placeholder="Categ..." 
-            value={filterCategory}
-            onChangeText={setFilterCategory}
-          />
-        </View>
+        <TouchableOpacity
+          style={styles.filterDropdown}
+          onPress={() => openCategoryPicker('filter')}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.dropdownText, !filterCategory && styles.dropdownPlaceholder]} numberOfLines={1}>
+            {filterCategory || 'Categorias'}
+          </Text>
+          <Ionicons name="chevron-down" size={18} color="#777" />
+        </TouchableOpacity>
+        {filterCategory ? (
+          <TouchableOpacity style={styles.clearCategoryBtn} onPress={() => setFilterCategory('')}>
+            <Ionicons name="close" size={16} color="#666" />
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {loading && !refreshing ? (
         <View style={styles.center}><ActivityIndicator size="large" color={AppTheme.primary} /></View>
       ) : (
-        <FlatList
-          data={filteredCompetitions}
+        <SectionList
+          sections={groupedCompetitions}
           keyExtractor={item => item.id}
           renderItem={renderItem}
+          renderSectionHeader={({ section }) => (
+            <View style={styles.sectionHeader}>
+              {section.showCategory ? (
+                <Text style={styles.sectionHeaderTitle}>{section.title}</Text>
+              ) : null}
+              <View style={[styles.genderHeader, !section.showCategory && styles.genderHeaderCompact]}>
+                <Text style={styles.genderHeaderTitle}>{section.gender}</Text>
+                <Text style={styles.sectionHeaderCount}>{section.data.length}</Text>
+              </View>
+            </View>
+          )}
+          stickySectionHeadersEnabled={false}
           contentContainerStyle={[styles.list, { paddingBottom: TAB_BAR_HEIGHT + insets.bottom + 40 }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={<Text style={styles.emptyText}>Nenhuma competição encontrada.</Text>}
@@ -614,9 +728,30 @@ export default function CompeticoesListScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.label}>Categoria</Text>
-                  <TextInput style={styles.input} value={formCategoryComp} onChangeText={setFormCategoryComp} placeholder="Adulto" />
+                  <TouchableOpacity
+                    style={styles.dropdownField}
+                    onPress={() => openCategoryPicker('form')}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.dropdownText, !formCategoryComp && styles.dropdownPlaceholder]} numberOfLines={1}>
+                      {formCategoryComp || 'Selecione'}
+                    </Text>
+                    <Ionicons name="chevron-down" size={18} color="#777" />
+                  </TouchableOpacity>
                 </View>
               </View>
+
+              <Text style={styles.label}>Gênero</Text>
+              <TouchableOpacity
+                style={styles.dropdownField}
+                onPress={() => setGenderPickerVisible(true)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.dropdownText, !formGender && styles.dropdownPlaceholder]} numberOfLines={1}>
+                  {formGender || 'Selecione'}
+                </Text>
+                <Ionicons name="chevron-down" size={18} color="#777" />
+              </TouchableOpacity>
 
               <View style={styles.rowInputs}>
                 <View style={{ flex: 1, marginRight: 8 }}>
@@ -917,6 +1052,63 @@ export default function CompeticoesListScreen() {
         </View>
       </Modal>
 
+      {/* --- DROPDOWN DE GENERO --- */}
+      <Modal visible={genderPickerVisible} animationType="fade" transparent onRequestClose={() => setGenderPickerVisible(false)}>
+        <TouchableOpacity style={styles.dropdownOverlay} activeOpacity={1} onPress={() => setGenderPickerVisible(false)}>
+          <View style={styles.dropdownMenu}>
+            <Text style={styles.dropdownTitle}>Gênero</Text>
+            {GENDER_OPTIONS.map(gender => {
+              const selected = formGender === gender;
+              return (
+                <TouchableOpacity
+                  key={gender}
+                  style={[styles.dropdownOption, selected && styles.dropdownOptionActive]}
+                  onPress={() => handleSelectGender(gender)}
+                >
+                  <Text style={[styles.dropdownOptionText, selected && styles.dropdownOptionTextActive]}>{gender}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* --- DROPDOWN DE CATEGORIAS --- */}
+      <Modal visible={categoryPickerVisible} animationType="fade" transparent onRequestClose={() => setCategoryPickerVisible(false)}>
+        <TouchableOpacity style={styles.dropdownOverlay} activeOpacity={1} onPress={() => setCategoryPickerVisible(false)}>
+          <View style={styles.dropdownMenu}>
+            <Text style={styles.dropdownTitle}>Categoria</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {categoryPickerMode === 'filter' ? (
+                <TouchableOpacity
+                  style={[styles.dropdownOption, !filterCategory && styles.dropdownOptionActive]}
+                  onPress={() => {
+                    setFilterCategory('');
+                    setCategoryPickerVisible(false);
+                  }}
+                >
+                  <Text style={[styles.dropdownOptionText, !filterCategory && styles.dropdownOptionTextActive]}>Todas</Text>
+                </TouchableOpacity>
+              ) : null}
+              {categoryFilterOptions.map(category => {
+                const selected = categoryPickerMode === 'form'
+                  ? formCategoryComp === category
+                  : filterCategory === category;
+                return (
+                  <TouchableOpacity
+                    key={category}
+                    style={[styles.dropdownOption, selected && styles.dropdownOptionActive]}
+                    onPress={() => handleSelectCategory(category)}
+                  >
+                    <Text style={[styles.dropdownOptionText, selected && styles.dropdownOptionTextActive]}>{category}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
     </View>
   );
 }
@@ -933,9 +1125,17 @@ const styles = StyleSheet.create({
   searchWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F2F4F6', borderRadius: 20, paddingHorizontal: 12, height: 40 },
   searchIcon: { marginRight: 6 },
   searchInput: { flex: 1, fontSize: 14, color: '#333' },
+  filterDropdown: { width: 140, marginLeft: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#F2F4F6', borderRadius: 20, paddingHorizontal: 12, height: 40 },
+  clearCategoryBtn: { width: 36, height: 40, marginLeft: 6, borderRadius: 18, backgroundColor: '#F2F4F6', alignItems: 'center', justifyContent: 'center' },
   matchesFilterRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
   clearFilterBtn: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: '#EEE', backgroundColor: '#FAFAFA' },
   clearFilterText: { fontSize: 12, fontWeight: '600', color: '#666' },
+  sectionHeader: { marginBottom: 8, marginTop: 8 },
+  sectionHeaderTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 8 },
+  genderHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, paddingHorizontal: 10, backgroundColor: '#FFF', borderRadius: 8, borderWidth: 1, borderColor: '#E8ECEF' },
+  genderHeaderCompact: { marginTop: 2 },
+  genderHeaderTitle: { fontSize: 13, fontWeight: '700', color: '#555' },
+  sectionHeaderCount: { minWidth: 26, height: 24, borderRadius: 12, backgroundColor: '#EAF1EC', color: AppTheme.primary, fontSize: 12, fontWeight: 'bold', textAlign: 'center', lineHeight: 24 },
 
   // Cards
   card: { backgroundColor: '#FFF', borderRadius: 16, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 3, overflow: 'hidden' },
@@ -946,6 +1146,7 @@ const styles = StyleSheet.create({
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 4 },
   cardSubtitle: { fontSize: 13, color: '#666' },
+  genderMetaText: { marginLeft: 10, color: '#555', fontWeight: '600' },
   badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   badgeText: { fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' },
   row: { flexDirection: 'row', alignItems: 'center' },
@@ -970,6 +1171,16 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   label: { fontSize: 13, fontWeight: '600', color: '#666', marginTop: 12, marginBottom: 6 },
   input: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, padding: 10, fontSize: 14, backgroundColor: '#FAFAFA' },
+  dropdownField: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, paddingHorizontal: 10, height: 42, backgroundColor: '#FAFAFA', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  dropdownText: { flex: 1, fontSize: 14, color: '#333', marginRight: 8 },
+  dropdownPlaceholder: { color: '#777' },
+  dropdownOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', padding: 20 },
+  dropdownMenu: { backgroundColor: '#FFF', borderRadius: 10, paddingVertical: 8, maxHeight: '75%', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 6 },
+  dropdownTitle: { fontSize: 13, fontWeight: 'bold', color: '#666', paddingHorizontal: 18, paddingVertical: 10 },
+  dropdownOption: { minHeight: 42, paddingHorizontal: 18, justifyContent: 'center' },
+  dropdownOptionActive: { backgroundColor: '#EAF1EC' },
+  dropdownOptionText: { fontSize: 15, color: '#222' },
+  dropdownOptionTextActive: { color: AppTheme.primary, fontWeight: 'bold' },
   rowInputs: { flexDirection: 'row', alignItems: 'center' },
   statusOption: { flex: 1, padding: 10, borderWidth: 1, borderColor: '#EEE', borderRadius: 8, alignItems: 'center', marginRight: 6 },
   statusActive: { backgroundColor: AppTheme.primary, borderColor: AppTheme.primary },
