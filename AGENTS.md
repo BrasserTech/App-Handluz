@@ -7,4 +7,5 @@
 - **Aspas:** Usar aspas normais (`"`), nao tipograficas
 - **Analise:** Usar thinking antes de dar respostas para garantir analise completa
 - **Codificacao:** Preservar arquivos em UTF-8. Nao usar comandos ou scripts que possam regravar arquivo em encoding ambiguo. Se precisar editar via shell, validar depois que nao houve mojibake nem quebra de sintaxe.
+- **Textos visiveis:** Sempre revisar textos visiveis ao usuario apos editar arquivos para garantir que nao houve mojibake, especialmente em acentos como "acao", "autorizacao", "visualizacao", "edicao" e textos de botoes, modais e alerts.
 - **Perguntas:** Para perguntas de 'se é necessario ou perguntas que precisam de banco de dados' voce deve consultar o banco e validar no codigo antes de responder

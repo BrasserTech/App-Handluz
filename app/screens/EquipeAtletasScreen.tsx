@@ -32,7 +32,7 @@ import { AppTheme } from '../../constants/theme';
 import type { EquipesStackParamList } from '../navigation/EquipesStackNavigator';
 import { supabase } from '../services/supabaseClient';
 import { usePermissions } from '../../hooks/usePermissions';
-import { encryptImageBlob } from '../services/imageEncryption';
+import { downloadAndDecryptFile, encryptFileBlob } from '../services/imageEncryption';
 import EncryptedImage from '../../components/EncryptedImage';
 
 type Props = NativeStackScreenProps<EquipesStackParamList, 'EquipeAtletas'>;
@@ -61,10 +61,22 @@ type FieldErrors = {
   email?: string;
 };
 
+type FeedbackType = 'success' | 'error' | 'info';
+
+type ScreenFeedback = {
+  type: FeedbackType;
+  message: string;
+};
+
 export default function EquipeAtletasScreen({ route }: Props) {
   const { equipeId, equipeNome } = route.params;
   const { isDiretoriaOrAdmin } = usePermissions();
   const insets = useSafeAreaInsets();
+  const windowWidth = Dimensions.get('window').width;
+  const feedbackWidth = Math.max(
+    220,
+    Math.min(windowWidth - 32, Math.floor(windowWidth / 3))
+  );
 
   const [atletas, setAtletas] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(false);
@@ -96,16 +108,17 @@ export default function EquipeAtletasScreen({ route }: Props) {
   const [birthDisplay, setBirthDisplay] = useState(''); // dd/mm/aaaa
 
   const [imagemAtleta, setImagemAtleta] = useState<PickedImage | null>(null);
-  const [docFrente, setDocFrente] = useState<PickedImage | null>(null);
-  const [docVerso, setDocVerso] = useState<PickedImage | null>(null);
   const [docPDF, setDocPDF] = useState<PickedImage | null>(null);
+  const [removeExistingImage, setRemoveExistingImage] = useState(false);
+  const [removeExistingPdf, setRemoveExistingPdf] = useState(false);
 
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [screenFeedback, setScreenFeedback] = useState<ScreenFeedback | null>(null);
 
   // Preview da foto do atleta
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
 
-  // Preview documentos (frente e verso)
+  // Compatibilidade com documentos legados de RG.
   const [docPreview, setDocPreview] = useState<{
     front?: string | null;
     back?: string | null;
@@ -114,12 +127,26 @@ export default function EquipeAtletasScreen({ route }: Props) {
   // Preview PDF
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!screenFeedback) return;
+
+    const timeout = setTimeout(() => {
+      setScreenFeedback(null);
+    }, 4000);
+
+    return () => clearTimeout(timeout);
+  }, [screenFeedback]);
+
 
   // ========================= UTILITÁRIOS =========================
 
   function validarEmail(email: string): boolean {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email.trim());
+  }
+
+  function showFeedback(type: FeedbackType, message: string) {
+    setScreenFeedback({ type, message });
   }
 
   function calcularIdade(dateString: string | null): number | null {
@@ -180,12 +207,14 @@ export default function EquipeAtletasScreen({ route }: Props) {
         const file = target.files?.[0];
         if (file) {
           if (file.type !== 'application/pdf') {
-            Alert.alert('Erro', 'Por favor, selecione apenas arquivos PDF.');
+            showFeedback('error', 'Por favor, selecione apenas arquivos PDF.');
             return;
           }
           const uri = URL.createObjectURL(file);
           console.log('[EquipeAtletasScreen] PDF selecionado (web):', uri);
           setPDF({ uri });
+          setRemoveExistingPdf(false);
+          showFeedback('success', 'PDF selecionado com sucesso.');
         }
         document.body.removeChild(input);
       };
@@ -221,14 +250,16 @@ export default function EquipeAtletasScreen({ route }: Props) {
       if (assetUri) {
         console.log('[EquipeAtletasScreen] PDF selecionado com sucesso:', assetUri);
         setPDF({ uri: assetUri });
+        setRemoveExistingPdf(false);
+        showFeedback('success', 'PDF selecionado com sucesso.');
         return;
       }
 
       console.warn('[EquipeAtletasScreen] Resultado inesperado:', result);
-      Alert.alert('Aviso', 'Não foi possível processar o arquivo selecionado.');
+      showFeedback('error', 'Não foi possível processar o arquivo selecionado.');
     } catch (err) {
       console.error('[EquipeAtletasScreen] Erro ao selecionar PDF:', err);
-      Alert.alert('Erro', `Não foi possível selecionar o arquivo PDF: ${err instanceof Error ? err.message : 'Erro desconhecido'}`);
+      showFeedback('error', `Não foi possível selecionar o arquivo PDF: ${err instanceof Error ? err.message : 'Erro desconhecido'}`);
     }
   }
 
@@ -259,11 +290,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
         return null;
       }
 
-      const { data: publicData } = supabase.storage
-        .from('athletes')
-        .getPublicUrl(data.path);
-
-      return publicData.publicUrl ?? null;
+      return data.path ?? null;
     } catch (err) {
       console.error('[EquipeAtletasScreen] Erro inesperado upload:', err);
       return null;
@@ -271,6 +298,8 @@ export default function EquipeAtletasScreen({ route }: Props) {
   }
 
   // Função específica para upload de documentos criptografados
+  // Mantido apenas para compatibilidade com documentos legados já salvos.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async function uploadEncryptedDocument(
     picked: PickedImage,
     pathPrefix: string
@@ -283,7 +312,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
       const originalContentType = originalBlob.type || 'image/jpeg';
 
       // Criptografar o documento antes do upload
-      const encryptedBlob = await encryptImageBlob(originalBlob);
+      const encryptedBlob = await encryptFileBlob(originalBlob);
 
       const extGuess = picked.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
       const fileExt = ['jpg', 'jpeg', 'png', 'webp'].includes(extGuess)
@@ -342,37 +371,36 @@ export default function EquipeAtletasScreen({ route }: Props) {
       const isPDF = fileExtension === 'pdf' || blob.type === 'application/pdf';
       
       if (!isPDF) {
-        Alert.alert('Erro', 'O arquivo selecionado não é um PDF válido.');
+        showFeedback('error', 'O arquivo selecionado não é um PDF válido.');
         return null;
       }
 
-      const filePath = `${pathPrefix}-${Date.now()}.pdf`;
+      const encryptedBlob = await encryptFileBlob(blob);
+      const fileToUpload = new Blob([encryptedBlob], { type: 'application/octet-stream' });
+      const filePath = `${pathPrefix}-${Date.now()}.pdf.enc`;
 
       // Upload para o bucket pdfDocuments
       const { data, error } = await supabase.storage
-        .from('pdfDocuments')
-        .upload(filePath, blob, {
+        .from('athletes')
+        .upload(filePath, fileToUpload, {
           upsert: true,
-          contentType: 'application/pdf',
+          contentType: 'application/octet-stream',
         });
 
       if (error) {
         console.error('[EquipeAtletasScreen] Erro upload PDF:', error.message);
-        Alert.alert(
-          'Erro no upload',
-          `Não foi possível fazer o upload do PDF: ${error.message}`
-        );
+        showFeedback('error', `Não foi possível fazer o upload do PDF: ${error.message}`);
         return null;
       }
 
       const { data: publicData } = supabase.storage
-        .from('pdfDocuments')
+        .from('athletes')
         .getPublicUrl(data.path);
 
       return publicData.publicUrl ?? null;
     } catch (err) {
       console.error('[EquipeAtletasScreen] Erro inesperado upload PDF:', err);
-      Alert.alert('Erro', 'Ocorreu um erro ao fazer o upload do PDF.');
+      showFeedback('error', 'Ocorreu um erro ao fazer o upload do PDF.');
       return null;
     }
   }
@@ -484,6 +512,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
     // Atualizar o preview IMEDIATAMENTE (antes do upload)
     setImagemAtleta(pickedImage);
+    setRemoveExistingImage(false);
     // Limpar erro de validação se houver
     if (fieldErrors.imagem) {
       setFieldErrors(prev => ({ ...prev, imagem: undefined }));
@@ -514,7 +543,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
             '[EquipeAtletasScreen] Erro ao atualizar image_url:',
             updateError.message
           );
-          Alert.alert('Erro', 'A imagem foi enviada, mas não foi possível atualizar o atleta.');
+          showFeedback('error', 'A imagem foi enviada, mas não foi possível atualizar o atleta.');
         } else {
           console.log('[EquipeAtletasScreen] image_url atualizado com sucesso');
           // Atualizar o estado do atleta em edição
@@ -522,7 +551,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
             ...editingAthlete,
             image_url: imageUrl,
           });
-          Alert.alert('Sucesso!', 'Imagem do atleta enviada com sucesso.');
+          showFeedback('success', 'Imagem do atleta enviada com sucesso.');
         }
       } else {
         console.warn('[EquipeAtletasScreen] Upload retornou null, mas a imagem local será salva ao clicar em Salvar');
@@ -531,9 +560,74 @@ export default function EquipeAtletasScreen({ route }: Props) {
       }
     } catch (error) {
       console.error('[EquipeAtletasScreen] Erro inesperado:', error);
-      Alert.alert('Erro', 'Ocorreu um erro ao fazer o upload da imagem. A imagem local será salva ao clicar em "Salvar".');
+      showFeedback('error', 'Ocorreu um erro ao fazer o upload da imagem. A imagem local será salva ao clicar em "Salvar".');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handlePreviewRestrictedPdf(documentUrl: string) {
+    try {
+      const decryptedUrl = await downloadAndDecryptFile(documentUrl, 'application/pdf');
+
+      if (!decryptedUrl) {
+        showFeedback('error', 'Não foi possível carregar a autorização de uso de imagem.');
+        return;
+      }
+
+      setPdfPreviewUrl(prevUrl => {
+        if (prevUrl?.startsWith('blob:')) {
+          URL.revokeObjectURL(prevUrl);
+        }
+        return decryptedUrl;
+      });
+    } catch (error) {
+      console.error('[EquipeAtletasScreen] Erro ao abrir PDF restrito:', error);
+      showFeedback('error', 'Ocorreu um erro ao abrir a autorização de uso de imagem.');
+    }
+  }
+
+  function handleDownloadPreviewPdf() {
+    if (!pdfPreviewUrl) return;
+
+    if (Platform.OS === 'web') {
+      const link = document.createElement('a');
+      link.href = pdfPreviewUrl;
+      link.download = 'autorizacao-uso-imagem.pdf';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
+    Linking.openURL(pdfPreviewUrl).catch(() => {
+      showFeedback('error', 'Não foi possível abrir a autorização.');
+    });
+  }
+
+  function handleRemoveImage() {
+    if (imagemAtleta) {
+      setImagemAtleta(null);
+      showFeedback('info', 'Imagem removida da seleção atual.');
+      return;
+    }
+
+    if (editingAthlete?.image_url && !removeExistingImage) {
+      setRemoveExistingImage(true);
+      showFeedback('info', 'Imagem marcada para remoção. Salve o atleta para confirmar.');
+    }
+  }
+
+  function handleRemovePdf() {
+    if (docPDF) {
+      setDocPDF(null);
+      showFeedback('info', 'Autorização removida da seleção atual.');
+      return;
+    }
+
+    if (editingAthlete?.document_url && !removeExistingPdf) {
+      setRemoveExistingPdf(true);
+      showFeedback('info', 'Autorização marcada para remoção. Salve o atleta para confirmar.');
     }
   }
 
@@ -581,7 +675,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
         supabase
           .from('athletes')
           .select(
-            'id, full_name, nickname, birthdate, phone, cpf_atleta, email, image_url, document_front_url, document_back_url, document_url'
+            'id, full_name, nickname, birthdate, phone, cpf_atleta, email, image_url, document_url'
           )
           .eq('team_id', equipeId)
           .order('full_name', { ascending: true }),
@@ -656,9 +750,9 @@ export default function EquipeAtletasScreen({ route }: Props) {
     setBirthDigits('');
     setBirthDisplay('');
     setImagemAtleta(null);
-    setDocFrente(null);
-    setDocVerso(null);
     setDocPDF(null);
+    setRemoveExistingImage(false);
+    setRemoveExistingPdf(false);
     setFieldErrors({});
     setModalVisible(true);
   }
@@ -696,9 +790,9 @@ export default function EquipeAtletasScreen({ route }: Props) {
       });
 
     setImagemAtleta(null);
-    setDocFrente(null);
-    setDocVerso(null);
     setDocPDF(null);
+    setRemoveExistingImage(false);
+    setRemoveExistingPdf(false);
     setFieldErrors({});
     setModalVisible(true);
   }
@@ -802,30 +896,23 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
         const athleteId = created.id as string;
 
-        const [imageUrl, docFrontUrl, docBackUrl, docPDFUrl] = await Promise.all([
+        const [imageUrl, docPDFUrl] = await Promise.all([
           imagemAtleta
             ? uploadImageToStorage(imagemAtleta, `${athleteId}-photo`)
-            : Promise.resolve(null),
-          docFrente
-            ? uploadEncryptedDocument(
-                docFrente,
-                `${athleteId}-doc-front`
-              )
-            : Promise.resolve(null),
-          docVerso
-            ? uploadEncryptedDocument(docVerso, `${athleteId}-doc-back`)
             : Promise.resolve(null),
           docPDF
             ? uploadPDFDocument(docPDF, `${athleteId}-doc-pdf`)
             : Promise.resolve(null),
         ]);
 
-        if (imageUrl || docFrontUrl || docBackUrl || docPDFUrl) {
+        if (imageUrl || docPDFUrl) {
           const updatePayload: any = {};
           if (imageUrl) updatePayload.image_url = imageUrl;
-          if (docFrontUrl) updatePayload.document_front_url = docFrontUrl;
-          if (docBackUrl) updatePayload.document_back_url = docBackUrl;
           if (docPDFUrl) updatePayload.document_url = docPDFUrl;
+          if (docPDFUrl) {
+            updatePayload.document_front_url = null;
+            updatePayload.document_back_url = null;
+          }
 
           const { error: updateError } = await supabase
             .from('athletes')
@@ -845,18 +932,9 @@ export default function EquipeAtletasScreen({ route }: Props) {
       if (editingAthlete) {
         const athleteId = editingAthlete.id;
 
-        const [imageUrl, docFrontUrl, docBackUrl, docPDFUrl] = await Promise.all([
+        const [imageUrl, docPDFUrl] = await Promise.all([
           imagemAtleta
             ? uploadImageToStorage(imagemAtleta, `${athleteId}-photo`)
-            : Promise.resolve(null),
-          docFrente
-            ? uploadEncryptedDocument(
-                docFrente,
-                `${athleteId}-doc-front`
-              )
-            : Promise.resolve(null),
-          docVerso
-            ? uploadEncryptedDocument(docVerso, `${athleteId}-doc-back`)
             : Promise.resolve(null),
           docPDF
             ? uploadPDFDocument(docPDF, `${athleteId}-doc-pdf`)
@@ -868,14 +946,20 @@ export default function EquipeAtletasScreen({ route }: Props) {
         // Se houver nova imagem local, usar ela. Caso contrário, usar a image_url do atleta (que pode ter sido atualizada via upload)
         if (imageUrl) {
           updatePayload.image_url = imageUrl;
+        } else if (removeExistingImage) {
+          updatePayload.image_url = null;
         } else if (editingAthlete.image_url) {
           // Se não há nova imagem local, mas há image_url no atleta (pode ter sido atualizada via upload), manter ela
           updatePayload.image_url = editingAthlete.image_url;
         }
         
-        if (docFrontUrl) updatePayload.document_front_url = docFrontUrl;
-        if (docBackUrl) updatePayload.document_back_url = docBackUrl;
         if (docPDFUrl) updatePayload.document_url = docPDFUrl;
+        if (docPDFUrl) {
+          updatePayload.document_front_url = null;
+          updatePayload.document_back_url = null;
+        } else if (removeExistingPdf) {
+          updatePayload.document_url = null;
+        }
 
         // Se um time foi selecionado, atualizar team_id e category_id
         if (selectedTeamIdForEdit) {
@@ -906,7 +990,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
             '[EquipeAtletasScreen] Erro atualizar atleta (edição):',
             updateError.message
           );
-          Alert.alert('Erro', 'Não foi possível atualizar o atleta.');
+          showFeedback('error', 'Não foi possível atualizar o atleta.');
           setSaving(false);
           return;
         }
@@ -916,13 +1000,10 @@ export default function EquipeAtletasScreen({ route }: Props) {
       setEditingAthlete(null);
       await carregarAtletas();
       if (mensagemIdadeIncompativel) {
-        Alert.alert(
-          'Atleta salvo com alerta',
-          `${mensagemIdadeIncompativel} O atleta foi salvo normalmente.`
-        );
+        showFeedback('info', `${mensagemIdadeIncompativel} O atleta foi salvo normalmente.`);
       } else {
-        Alert.alert(
-          'Sucesso',
+        showFeedback(
+          'success',
           editingAthlete
             ? 'Os dados do atleta foram atualizados com sucesso.'
             : 'O atleta foi cadastrado com sucesso.'
@@ -930,7 +1011,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
       }
     } catch (err) {
       console.error('[EquipeAtletasScreen] Erro inesperado salvar atleta:', err);
-      Alert.alert('Erro', 'Ocorreu um erro inesperado ao salvar o atleta.');
+      showFeedback('error', 'Ocorreu um erro inesperado ao salvar o atleta.');
     } finally {
       setSaving(false);
     }
@@ -1085,9 +1166,9 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
   function renderItem({ item }: { item: Athlete }) {
     const idade = calcularIdade(item.birthdate);
-    const temDocumento =
-      !!item.document_front_url || !!item.document_back_url;
-    const temPDF = !!item.document_url;
+    const temAutorizacaoImagem = !!item.document_url;
+    const temDocumento = false;
+    const temPDF = temAutorizacaoImagem;
     const idadeForaDoPermitido = verificarIdadeForaDoPermitido(idade);
     const mensagemIdadeIncompativel = getMensagemIdadeIncompativel(idade);
 
@@ -1157,7 +1238,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
         {/* Rodapé: documentos + ações da diretoria */}
         <View style={styles.cardBottomRow}>
           <View style={styles.cardLinksRow}>
-            {temDocumento && isDiretoriaOrAdmin && (
+            {temAutorizacaoImagem && isDiretoriaOrAdmin && (
               <View style={styles.docTag}>
                 <Ionicons
                   name="document-text-outline"
@@ -1165,7 +1246,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
                   color={AppTheme.primary}
                   style={{ marginRight: 4 }}
                 />
-                <Text style={styles.docTagText}>Documento cadastrado</Text>
+                <Text style={styles.docTagText}>Autorização cadastrada</Text>
               </View>
             )}
 
@@ -1193,8 +1274,8 @@ export default function EquipeAtletasScreen({ route }: Props) {
               <TouchableOpacity
                 style={styles.viewDocsButton}
                 onPress={async () => {
-                  if (Platform.OS === 'web') {
-                    setPdfPreviewUrl(item.document_url!);
+                  if (item.document_url) {
+                    await handlePreviewRestrictedPdf(item.document_url!);
                   } else {
                     // Para mobile, abrir PDF no navegador
                     const url = item.document_url!;
@@ -1213,7 +1294,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
                   color={AppTheme.primary}
                   style={{ marginRight: 4 }}
                 />
-                <Text style={styles.viewDocsText}>Ver PDF</Text>
+                <Text style={styles.viewDocsText}>Ver autorização</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -1257,11 +1338,35 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
   return (
     <View style={styles.container}>
+      {screenFeedback ? (
+        <View pointerEvents="box-none" style={styles.feedbackHost}>
+          <View
+            style={[
+              styles.feedbackToast,
+              { width: feedbackWidth },
+              screenFeedback.type === 'success' && styles.feedbackToastSuccess,
+              screenFeedback.type === 'error' && styles.feedbackToastError,
+              screenFeedback.type === 'info' && styles.feedbackToastInfo,
+            ]}
+          >
+            <View style={styles.feedbackContent}>
+              <Text style={styles.feedbackText}>{screenFeedback.message}</Text>
+              <TouchableOpacity
+                onPress={() => setScreenFeedback(null)}
+                style={styles.feedbackClose}
+              >
+                <Ionicons name="close" size={16} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
       <View style={styles.pageHeader}>
         <Text style={styles.pageTitle}>{equipeNome}</Text>
         <Text style={styles.pageSubtitle}>
           Veja os atletas vinculados a esta equipe. Se você faz parte da diretoria,
-          pode cadastrar novos atletas, anexar foto e documento (frente e costas).
+          pode cadastrar novos atletas, anexar foto e a autorização de uso de imagem em PDF.
         </Text>
       </View>
 
@@ -1452,112 +1557,49 @@ export default function EquipeAtletasScreen({ route }: Props) {
                       color={AppTheme.primary}
                       style={{ marginRight: 6 }}
                     />
-                    <Text style={styles.imageButtonText}>Escolher imagem</Text>
+                    <Text style={styles.imageButtonText}>
+                      {imagemAtleta || (editingAthlete?.image_url && !removeExistingImage)
+                        ? 'Alterar imagem'
+                        : 'Escolher imagem'}
+                    </Text>
                   </>
                 )}
               </TouchableOpacity>
 
+              {(imagemAtleta || (editingAthlete?.image_url && !removeExistingImage)) && (
+                <TouchableOpacity
+                  onPress={handleRemoveImage}
+                  style={styles.removeAttachmentButton}
+                >
+                  <Ionicons name="trash-outline" size={16} color="#C62828" style={{ marginRight: 4 }} />
+                  <Text style={styles.removeAttachmentText}>Remover</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <View style={styles.attachmentStatusCard}>
               {imagemAtleta ? (
-                <Image
-                  source={{ uri: imagemAtleta.uri }}
-                  style={styles.imagePreview}
-                />
-              ) : editingAthlete?.image_url ? (
-                <Image
-                  source={{ uri: editingAthlete.image_url }}
-                  style={styles.imagePreview}
-                />
-              ) : null}
+                <>
+                  <Image source={{ uri: imagemAtleta.uri }} style={styles.imagePreview} />
+                  <Text style={styles.attachmentStatusText}>Nova imagem selecionada para este atleta.</Text>
+                </>
+              ) : editingAthlete?.image_url && !removeExistingImage ? (
+                <>
+                  <Image source={{ uri: editingAthlete.image_url }} style={styles.imagePreview} />
+                  <Text style={styles.attachmentStatusText}>Já existe uma imagem vinculada a este atleta.</Text>
+                </>
+              ) : removeExistingImage ? (
+                <Text style={styles.attachmentStatusWarning}>A imagem atual será removida ao salvar.</Text>
+              ) : (
+                <Text style={styles.attachmentStatusMuted}>Nenhuma imagem vinculada no momento.</Text>
+              )}
             </View>
             {fieldErrors.imagem && (
               <Text style={styles.errorText}>{fieldErrors.imagem}</Text>
             )}
 
-            {/* Documento frente */}
+            {/* Autorização de uso de imagem */}
             <Text style={styles.fieldLabel}>
-              Documento frente (opcional)
-            </Text>
-            <View style={styles.imageRow}>
-              <TouchableOpacity
-                style={styles.imageButton}
-                onPress={() => pickImage(setDocFrente)}
-              >
-                <Ionicons
-                  name="document-text-outline"
-                  size={18}
-                  color={AppTheme.primary}
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={styles.imageButtonText}>
-                  {docFrente ? 'Trocar documento' : 'Escolher documento'}
-                </Text>
-              </TouchableOpacity>
-
-              {docFrente && (
-                <TouchableOpacity
-                  onPress={() => setDocFrente(null)}
-                  style={{ marginLeft: 8 }}
-                >
-                  <Ionicons
-                    name="close-circle-outline"
-                    size={24}
-                    color="#D32F2F"
-                  />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {docFrente && (
-              <Image
-                source={{ uri: docFrente.uri }}
-                style={styles.imagePreview}
-              />
-            )}
-
-            {/* Documento verso */}
-            <Text style={styles.fieldLabel}>
-              Documento verso (opcional)
-            </Text>
-            <View style={styles.imageRow}>
-              <TouchableOpacity
-                style={styles.imageButton}
-                onPress={() => pickImage(setDocVerso)}
-              >
-                <Ionicons
-                  name="document-text-outline"
-                  size={18}
-                  color={AppTheme.primary}
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={styles.imageButtonText}>
-                  {docVerso ? 'Trocar documento' : 'Escolher documento'}
-                </Text>
-              </TouchableOpacity>
-
-              {docVerso && (
-                <TouchableOpacity
-                  onPress={() => setDocVerso(null)}
-                  style={{ marginLeft: 8 }}
-                >
-                  <Ionicons
-                    name="close-circle-outline"
-                    size={24}
-                    color="#D32F2F"
-                  />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {docVerso && (
-              <Image
-                source={{ uri: docVerso.uri }}
-                style={styles.imagePreview}
-              />
-            )}
-
-            {/* Anexo PDF */}
-            <Text style={styles.fieldLabel}>
-              Anexo PDF (opcional)
+              Autorização de uso de imagem em PDF (opcional)
             </Text>
             <View style={styles.imageRow}>
               <TouchableOpacity
@@ -1571,34 +1613,39 @@ export default function EquipeAtletasScreen({ route }: Props) {
                   style={{ marginRight: 6 }}
                 />
                 <Text style={styles.imageButtonText}>
-                  {docPDF ? 'Trocar PDF' : 'Escolher PDF'}
+                  {docPDF || (editingAthlete?.document_url && !removeExistingPdf)
+                    ? 'Alterar autorização'
+                    : 'Escolher PDF'}
                 </Text>
               </TouchableOpacity>
 
-              {docPDF && (
+              {(docPDF || (editingAthlete?.document_url && !removeExistingPdf)) && (
                 <TouchableOpacity
-                  onPress={() => setDocPDF(null)}
-                  style={{ marginLeft: 8 }}
+                  onPress={handleRemovePdf}
+                  style={styles.removeAttachmentButton}
                 >
-                  <Ionicons
-                    name="close-circle-outline"
-                    size={24}
-                    color="#D32F2F"
-                  />
+                  <Ionicons name="trash-outline" size={16} color="#C62828" style={{ marginRight: 4 }} />
+                  <Text style={styles.removeAttachmentText}>Remover</Text>
                 </TouchableOpacity>
               )}
             </View>
-
-            {docPDF && (
-              <View style={styles.pdfPreview}>
-                <Ionicons
-                  name="document-text-outline"
-                  size={24}
-                  color={AppTheme.primary}
-                />
-                <Text style={styles.pdfPreviewText}>PDF selecionado</Text>
-              </View>
-            )}
+            <View style={styles.pdfPreview}>
+              {docPDF ? (
+                <>
+                  <Ionicons name="document-text-outline" size={24} color={AppTheme.primary} />
+                  <Text style={styles.pdfPreviewText}>Nova autorização selecionada para envio.</Text>
+                </>
+              ) : editingAthlete?.document_url && !removeExistingPdf ? (
+                <>
+                  <Ionicons name="document-lock-outline" size={24} color={AppTheme.primary} />
+                  <Text style={styles.pdfPreviewText}>Já existe uma autorização vinculada a este atleta.</Text>
+                </>
+              ) : removeExistingPdf ? (
+                <Text style={styles.attachmentStatusWarning}>A autorização atual será removida ao salvar.</Text>
+              ) : (
+                <Text style={styles.attachmentStatusMuted}>Nenhuma autorização vinculada no momento.</Text>
+              )}
+            </View>
 
             {/* Time - apenas ao editar */}
             {editingAthlete && (
@@ -1848,7 +1895,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
             <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()}>
               <View style={styles.pdfPreviewCard}>
                 <View style={styles.pdfPreviewHeader}>
-                  <Text style={styles.docsTitle}>PDF do Atleta</Text>
+                  <Text style={styles.docsTitle}>Autorização de uso de imagem</Text>
                   <TouchableOpacity
                     style={styles.previewCloseButton}
                     onPress={() => setPdfPreviewUrl(null)}
@@ -1858,16 +1905,30 @@ export default function EquipeAtletasScreen({ route }: Props) {
                 </View>
 
                 {Platform.OS === 'web' && pdfPreviewUrl ? (
-                  <iframe
-                    src={pdfPreviewUrl}
-                    style={{
-                      width: '100%',
-                      height: '600px',
-                      border: 'none',
-                      borderRadius: 8,
-                    }}
-                    title="PDF Viewer"
-                  />
+                  <>
+                    <iframe
+                      src={pdfPreviewUrl}
+                      style={{
+                        width: '100%',
+                        height: '600px',
+                        border: 'none',
+                        borderRadius: 8,
+                      }}
+                      title="PDF Viewer"
+                    />
+                    <TouchableOpacity
+                      style={styles.pdfOpenButton}
+                      onPress={handleDownloadPreviewPdf}
+                    >
+                      <Ionicons
+                        name="download-outline"
+                        size={18}
+                        color="#FFF"
+                        style={{ marginRight: 6 }}
+                      />
+                      <Text style={styles.pdfOpenButtonText}>Baixar autorização</Text>
+                    </TouchableOpacity>
+                  </>
                 ) : (
                   <View style={styles.pdfPreviewContent}>
                     <Ionicons
@@ -1897,7 +1958,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
                         color="#FFF"
                         style={{ marginRight: 6 }}
                       />
-                      <Text style={styles.pdfOpenButtonText}>Abrir PDF</Text>
+                      <Text style={styles.pdfOpenButtonText}>Abrir autorização</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -1953,6 +2014,47 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     color: AppTheme.textSecondary,
+  },
+  feedbackHost: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    zIndex: 30,
+    alignItems: 'flex-end',
+  },
+  feedbackToast: {
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    shadowColor: '#000000',
+    shadowOpacity: 0.14,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  feedbackContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  feedbackText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  feedbackClose: {
+    marginLeft: 10,
+    padding: 2,
+  },
+  feedbackToastSuccess: {
+    backgroundColor: '#2E7D32',
+  },
+  feedbackToastError: {
+    backgroundColor: '#C62828',
+  },
+  feedbackToastInfo: {
+    backgroundColor: '#355C9A',
   },
   card: {
     backgroundColor: AppTheme.surface,
@@ -2183,6 +2285,22 @@ const styles = StyleSheet.create({
     color: AppTheme.primary,
     fontWeight: '600',
   },
+  removeAttachmentButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#F0C8C8',
+    backgroundColor: '#FFF5F5',
+  },
+  removeAttachmentText: {
+    fontSize: 13,
+    color: '#C62828',
+    fontWeight: '600',
+  },
   imageButtonDisabled: {
     opacity: 0.6,
     backgroundColor: '#F5F5F5',
@@ -2195,7 +2313,31 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    marginLeft: 10,
+    marginRight: 10,
+  },
+  attachmentStatusCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    padding: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+    backgroundColor: '#F9FBFC',
+  },
+  attachmentStatusText: {
+    flex: 1,
+    fontSize: 12,
+    color: AppTheme.textPrimary,
+  },
+  attachmentStatusMuted: {
+    fontSize: 12,
+    color: AppTheme.textMuted,
+  },
+  attachmentStatusWarning: {
+    fontSize: 12,
+    color: '#C65A00',
+    fontWeight: '600',
   },
   modalButtonsRow: {
     flexDirection: 'row',
@@ -2370,8 +2512,8 @@ const styles = StyleSheet.create({
   pdfPreview: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
-    padding: 6,
+    marginTop: 8,
+    padding: 8,
     backgroundColor: '#F5F5F5',
     borderRadius: 8,
     borderWidth: 1,

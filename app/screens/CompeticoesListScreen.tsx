@@ -34,6 +34,8 @@ type Competition = {
   gender: string | null;
   start_date: string | null;
   end_date: string | null;
+  played_at: string | null;
+  opponent_name: string | null;
   status: 'agendado' | 'em_andamento' | 'encerrado';
   description: string | null;
   youtube_link: string | null;
@@ -96,6 +98,8 @@ export default function CompeticoesListScreen() {
   const [formGender, setFormGender] = useState('');
   const [formStartDate, setFormStartDate] = useState('');
   const [formEndDate, setFormEndDate] = useState('');
+  const [formPlayedAt, setFormPlayedAt] = useState('');
+  const [formOpponentName, setFormOpponentName] = useState('');
   const [formStatus, setFormStatus] = useState<'agendado' | 'em_andamento' | 'encerrado'>('agendado');
   const [formYoutube, setFormYoutube] = useState('');
   const [formPlacement, setFormPlacement] = useState('');
@@ -490,6 +494,8 @@ export default function CompeticoesListScreen() {
       setFormGender(competition.gender || '');
       setFormStartDate(formatDateToBr(competition.start_date));
       setFormEndDate(formatDateToBr(competition.end_date));
+      setFormPlayedAt(formatDateToBr(competition.played_at));
+      setFormOpponentName(competition.opponent_name || '');
       setFormStatus(competition.status);
       setFormYoutube(competition.youtube_link || '');
       setFormPlacement(competition.placement || '');
@@ -502,6 +508,8 @@ export default function CompeticoesListScreen() {
       setFormGender('');
       setFormStartDate('');
       setFormEndDate('');
+      setFormPlayedAt('');
+      setFormOpponentName('');
       setFormStatus('agendado');
       setFormYoutube('');
       setFormPlacement('');
@@ -524,6 +532,8 @@ export default function CompeticoesListScreen() {
         gender: formGender.trim() || null,
         start_date: parseDateToISO(formStartDate),
         end_date: parseDateToISO(formEndDate),
+        played_at: parseDateToISO(formPlayedAt),
+        opponent_name: formOpponentName.trim() || null,
         status: formStatus,
         youtube_link: formYoutube.trim() || null,
         placement: formPlacement.trim() || null,
@@ -761,6 +771,29 @@ export default function CompeticoesListScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.label}>Fim</Text>
                   <TextInput style={styles.input} value={formEndDate} onChangeText={(t) => handleDateChange(t, setFormEndDate)} placeholder="dd/mm/aaaa" keyboardType="numeric" maxLength={10} />
+                </View>
+              </View>
+
+              <View style={styles.rowInputs}>
+                <View style={{ flex: 1, marginRight: 8 }}>
+                  <Text style={styles.label}>Data do jogo</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={formPlayedAt}
+                    onChangeText={(t) => handleDateChange(t, setFormPlayedAt)}
+                    placeholder="dd/mm/aaaa"
+                    keyboardType="numeric"
+                    maxLength={10}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Adversário</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={formOpponentName}
+                    onChangeText={setFormOpponentName}
+                    placeholder="Nome do adversário"
+                  />
                 </View>
               </View>
 

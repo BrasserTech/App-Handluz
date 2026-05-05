@@ -1,15 +1,12 @@
 // app/services/imageEncryption.ts
-// Serviço para criptografar e descriptografar imagens antes/depois de salvar no Supabase.
-// As imagens são criptografadas no cliente antes do upload e descriptografadas apenas quando o usuário está autenticado.
+// Serviço para criptografar e descriptografar arquivos antes/depois de salvar no Supabase.
+// Os arquivos são criptografados no cliente antes do upload e descriptografados apenas quando o usuário está autenticado.
 
-import CryptoJS from 'crypto-js';
+import * as CryptoJS from 'crypto-js';
+import { supabase } from './supabaseClient';
 
-// Chave de criptografia (em produção, isso deve ser armazenado de forma mais segura)
 const ENCRYPTION_KEY_STRING = 'handluz-image-encryption-key-2024-secure-very-long-key-for-aes-256';
 
-/**
- * Converte Uint8Array para string base64
- */
 function uint8ArrayToBase64(uint8Array: Uint8Array): string {
   let binary = '';
   for (let i = 0; i < uint8Array.length; i++) {
@@ -18,9 +15,6 @@ function uint8ArrayToBase64(uint8Array: Uint8Array): string {
   return btoa(binary);
 }
 
-/**
- * Converte string base64 para Uint8Array
- */
 function base64ToUint8Array(base64: string): Uint8Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -30,114 +24,127 @@ function base64ToUint8Array(base64: string): Uint8Array {
   return bytes;
 }
 
-/**
- * Criptografa um Blob de imagem antes de fazer upload
- * @param imageBlob - O blob da imagem a ser criptografado
- * @returns Blob criptografado
- */
-export async function encryptImageBlob(imageBlob: Blob): Promise<Blob> {
+export async function encryptFileBlob(fileBlob: Blob): Promise<Blob> {
   try {
-    // Converter blob para base64
-    const arrayBuffer = await imageBlob.arrayBuffer();
+    const arrayBuffer = await fileBlob.arrayBuffer();
     const uint8Array = new Uint8Array(arrayBuffer);
     const base64String = uint8ArrayToBase64(uint8Array);
-    
-    // Criptografar usando AES - CryptoJS retorna uma string no formato: "iv+ciphertext" em base64
+
     const encrypted = CryptoJS.AES.encrypt(base64String, ENCRYPTION_KEY_STRING, {
       mode: CryptoJS.mode.CBC,
       padding: CryptoJS.pad.Pkcs7,
     });
-    
-    // CryptoJS retorna uma string no formato OpenSSL: base64(iv + ciphertext)
-    // Converter essa string base64 para bytes
+
     const encryptedBase64 = encrypted.toString();
     const encryptedBytes = base64ToUint8Array(encryptedBase64);
-    
-    // Criar ArrayBuffer a partir dos bytes
+
     const buffer = new ArrayBuffer(encryptedBytes.length);
     const view = new Uint8Array(buffer);
     view.set(encryptedBytes);
-    
-    // Retornar como Blob preservando o tipo original
-    return new Blob([buffer], { type: imageBlob.type || 'image/jpeg' });
+
+    return new Blob([buffer], { type: fileBlob.type || 'application/octet-stream' });
   } catch (error) {
-    console.error('[imageEncryption] Erro ao criptografar imagem:', error);
-    throw new Error('Falha ao criptografar imagem');
+    console.error('[imageEncryption] Erro ao criptografar arquivo:', error);
+    throw new Error('Falha ao criptografar arquivo');
   }
 }
 
-/**
- * Descriptografa um Blob de imagem baixado do Supabase
- * @param encryptedBlob - O blob criptografado
- * @returns Blob descriptografado (imagem original)
- */
-export async function decryptImageBlob(encryptedBlob: Blob): Promise<Blob> {
+export async function decryptFileBlob(
+  encryptedBlob: Blob,
+  mimeType?: string
+): Promise<Blob> {
   try {
-    // Converter blob criptografado para base64
     const arrayBuffer = await encryptedBlob.arrayBuffer();
     const uint8Array = new Uint8Array(arrayBuffer);
     const encryptedBase64 = uint8ArrayToBase64(uint8Array);
-    
-    // Descriptografar - CryptoJS espera o formato OpenSSL (base64 com IV+ciphertext)
+
     const decrypted = CryptoJS.AES.decrypt(encryptedBase64, ENCRYPTION_KEY_STRING, {
       mode: CryptoJS.mode.CBC,
       padding: CryptoJS.pad.Pkcs7,
     });
-    
-    // Converter WordArray para string UTF-8 (que contém a string base64 original)
+
     const decryptedBase64String = decrypted.toString(CryptoJS.enc.Utf8);
-    
-    // Validar se é uma string base64 válida
+
     if (!decryptedBase64String || decryptedBase64String.length === 0) {
       throw new Error('Descriptografia retornou string vazia');
     }
-    
-    // Decodificar base64 para obter os bytes da imagem original
-    const imageBytes = base64ToUint8Array(decryptedBase64String);
-    
-    // Criar novo ArrayBuffer
-    const buffer = new ArrayBuffer(imageBytes.length);
+
+    const fileBytes = base64ToUint8Array(decryptedBase64String);
+    const buffer = new ArrayBuffer(fileBytes.length);
     const view = new Uint8Array(buffer);
-    view.set(imageBytes);
-    
-    // Retornar como Blob
-    return new Blob([buffer], { type: 'image/jpeg' });
+    view.set(fileBytes);
+
+    return new Blob([buffer], {
+      type: mimeType || encryptedBlob.type || 'application/octet-stream',
+    });
   } catch (error) {
-    console.error('[imageEncryption] Erro ao descriptografar imagem:', error);
-    throw new Error('Falha ao descriptografar imagem. A imagem pode estar corrompida ou não foi criptografada.');
+    console.error('[imageEncryption] Erro ao descriptografar arquivo:', error);
+    throw new Error('Falha ao descriptografar arquivo. O conteúdo pode estar corrompido ou não foi criptografado.');
   }
 }
 
-/**
- * Baixa e descriptografa uma imagem do Supabase Storage
- * @param supabaseUrl - URL pública da imagem no Supabase
- * @returns URL local da imagem descriptografada (blob URL) ou null em caso de erro
- */
-export async function downloadAndDecryptImage(supabaseUrl: string): Promise<string | null> {
+export async function downloadAndDecryptFile(
+  storageReference: string,
+  mimeType?: string
+): Promise<string | null> {
   try {
-    console.log('[imageEncryption] Baixando imagem de:', supabaseUrl);
-    
-    // Baixar a imagem criptografada
-    const response = await fetch(supabaseUrl);
-    if (!response.ok) {
-      console.error('[imageEncryption] Erro ao baixar imagem:', response.status, response.statusText);
-      return null;
-    }
+    console.log('[imageEncryption] Baixando arquivo de:', storageReference);
 
-    const encryptedBlob = await response.blob();
-    console.log('[imageEncryption] Blob criptografado baixado, tamanho:', encryptedBlob.size);
-    
-    // Descriptografar
-    const decryptedBlob = await decryptImageBlob(encryptedBlob);
-    console.log('[imageEncryption] Blob descriptografado, tamanho:', decryptedBlob.size);
-    
-    // Criar URL local para a imagem descriptografada
+    let encryptedBlob: Blob;
+    const storageMatch = storageReference.match(/\/storage\/v1\/object\/(?:public|sign)\/([^/]+)\/(.+)$/);
+
+    if (!storageReference.startsWith('http')) {
+      const { data, error } = await supabase.storage
+        .from('athletes')
+        .download(storageReference);
+
+      if (error || !data) {
+        console.error('[imageEncryption] Erro ao baixar arquivo pelo path:', error?.message);
+        return null;
+      }
+
+      encryptedBlob = data;
+    } else if (storageMatch) {
+      const bucketName = storageMatch[1];
+      const filePath = decodeURIComponent(storageMatch[2]);
+      const { data, error } = await supabase.storage
+        .from(bucketName)
+        .download(filePath);
+
+      if (error || !data) {
+        console.error('[imageEncryption] Erro ao baixar arquivo pela URL convertida:', error?.message);
+        return null;
+      }
+
+      encryptedBlob = data;
+    } else {
+      const response = await fetch(storageReference);
+      if (!response.ok) {
+        console.error('[imageEncryption] Erro ao baixar arquivo:', response.status, response.statusText);
+        return null;
+      }
+
+      encryptedBlob = await response.blob();
+    }
+    const decryptedBlob = await decryptFileBlob(encryptedBlob, mimeType);
     const objectUrl = URL.createObjectURL(decryptedBlob);
-    console.log('[imageEncryption] URL do objeto criada:', objectUrl);
-    
+
+    console.log('[imageEncryption] Arquivo descriptografado com sucesso');
     return objectUrl;
   } catch (error) {
     console.error('[imageEncryption] Erro ao baixar e descriptografar:', error);
     return null;
   }
+}
+
+export async function encryptImageBlob(imageBlob: Blob): Promise<Blob> {
+  return encryptFileBlob(imageBlob);
+}
+
+export async function decryptImageBlob(encryptedBlob: Blob): Promise<Blob> {
+  return decryptFileBlob(encryptedBlob, 'image/jpeg');
+}
+
+export async function downloadAndDecryptImage(supabaseUrl: string): Promise<string | null> {
+  return downloadAndDecryptFile(supabaseUrl, 'image/jpeg');
 }
