@@ -647,6 +647,7 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
   function abrirModalNovoAtleta() {
     setEditingAthlete(null);
+    setSelectedTeamIdForEdit(equipeId);
     setFormNomeCompleto('');
     setFormApelido('');
     setFormTelefone('');
@@ -754,6 +755,11 @@ export default function EquipeAtletasScreen({ route }: Props) {
 
       const birthdateDb = getBirthdateForPayload();
       basePayload.birthdate = birthdateDb;
+      const idadeAtual = calcularIdade(birthdateDb);
+      const mensagemIdadeIncompativel =
+        !editingAthlete || selectedTeamIdForEdit === equipeId
+          ? getMensagemIdadeIncompativel(idadeAtual)
+          : null;
 
       // ---------- CRIAÇÃO ----------
       if (!editingAthlete) {
@@ -909,6 +915,19 @@ export default function EquipeAtletasScreen({ route }: Props) {
       setModalVisible(false);
       setEditingAthlete(null);
       await carregarAtletas();
+      if (mensagemIdadeIncompativel) {
+        Alert.alert(
+          'Atleta salvo com alerta',
+          `${mensagemIdadeIncompativel} O atleta foi salvo normalmente.`
+        );
+      } else {
+        Alert.alert(
+          'Sucesso',
+          editingAthlete
+            ? 'Os dados do atleta foram atualizados com sucesso.'
+            : 'O atleta foi cadastrado com sucesso.'
+        );
+      }
     } catch (err) {
       console.error('[EquipeAtletasScreen] Erro inesperado salvar atleta:', err);
       Alert.alert('Erro', 'Ocorreu um erro inesperado ao salvar o atleta.');
@@ -1043,12 +1062,34 @@ export default function EquipeAtletasScreen({ route }: Props) {
     return false;
   }
 
+  function getFaixaEtariaDaEquipe(): string | null {
+    if (!teamCategory) return null;
+
+    const { age_min, age_max } = teamCategory;
+    if (age_min === null && age_max === null) return null;
+    if (age_min !== null && age_max !== null) return `${age_min} a ${age_max} anos`;
+    if (age_min !== null) return `a partir de ${age_min} anos`;
+    return `até ${age_max} anos`;
+  }
+
+  function getMensagemIdadeIncompativel(idade: number | null): string | null {
+    if (!verificarIdadeForaDoPermitido(idade)) return null;
+
+    const faixaEtaria = getFaixaEtariaDaEquipe();
+    if (!faixaEtaria) {
+      return 'Idade incompatível com a categoria deste time.';
+    }
+
+    return `Idade incompatível com a categoria deste time. Permitido: ${faixaEtaria}.`;
+  }
+
   function renderItem({ item }: { item: Athlete }) {
     const idade = calcularIdade(item.birthdate);
     const temDocumento =
       !!item.document_front_url || !!item.document_back_url;
     const temPDF = !!item.document_url;
     const idadeForaDoPermitido = verificarIdadeForaDoPermitido(idade);
+    const mensagemIdadeIncompativel = getMensagemIdadeIncompativel(idade);
 
     return (
       <View style={styles.card}>
@@ -1088,6 +1129,11 @@ export default function EquipeAtletasScreen({ route }: Props) {
               </View>
               {item.nickname ? (
                 <Text style={styles.cardLineMuted}>Apelido: {item.nickname}</Text>
+              ) : null}
+              {mensagemIdadeIncompativel ? (
+                <Text style={styles.cardWarningText}>
+                  {mensagemIdadeIncompativel}
+                </Text>
               ) : null}
             </View>
           </View>
@@ -1967,6 +2013,11 @@ const styles = StyleSheet.create({
   cardLineMuted: {
     fontSize: 12,
     color: AppTheme.textMuted,
+  },
+  cardWarningText: {
+    fontSize: 12,
+    color: '#C65A00',
+    marginTop: 4,
   },
   cardBottomRow: {
     flexDirection: 'row',

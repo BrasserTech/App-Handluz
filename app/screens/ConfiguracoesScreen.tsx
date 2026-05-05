@@ -14,6 +14,7 @@ import {
   Linking,
   Image,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -57,46 +58,26 @@ type NewsItem = {
   description?: string | null;
 };
 
+type CategoryAgeRow = {
+  id: number;
+  name: string;
+  age_min: number | null;
+  age_max: number | null;
+  ageMinInput: string;
+  ageMaxInput: string;
+};
+
+type CategoryFeedback = {
+  type: 'success' | 'error' | 'info';
+  message: string;
+};
+
 // ------- Utilidades simples de data/hora -------
-
-function isoToBrDate(dateStr: string | null): string {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
-}
-
-function formatDateRange(start: string | null, end: string | null): string {
-  if (!start && !end) return 'Data não informada';
-  if (start && !end) return isoToBrDate(start);
-  if (!start && end) return isoToBrDate(end);
-  if (start && end && start === end) return isoToBrDate(start);
-  return `${isoToBrDate(start)} a ${isoToBrDate(end)}`;
-}
-
-function maskDate(text: string): string {
-  const digits = text.replace(/\D/g, '').slice(0, 8);
-  if (digits.length <= 2) return digits;
-  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
-}
 
 function maskTime(text: string): string {
   const digits = text.replace(/\D/g, '').slice(0, 4);
   if (digits.length <= 2) return digits;
   return `${digits.slice(0, 2)}:${digits.slice(2)}`;
-}
-
-function digitsToIso(digits: string): string | null {
-  if (digits.length !== 8) return null;
-  const d = digits.slice(0, 2);
-  const m = digits.slice(2, 4);
-  const y = digits.slice(4, 8);
-  return `${y}-${m}-${d}`; // yyyy-mm-dd
 }
 
 
@@ -105,23 +86,29 @@ function digitsToIso(digits: string): string | null {
 export default function DiretoriaScreen() {
   const { user, isDiretoriaOrAdmin } = usePermissions();
   const isAdmin = user?.role === 'admin';
+  const { width: windowWidth } = useWindowDimensions();
+
+  const categoryColumns =
+    windowWidth >= 1700 ? 7 :
+    windowWidth >= 1450 ? 6 :
+    windowWidth >= 1200 ? 5 :
+    windowWidth >= 960 ? 4 :
+    windowWidth >= 720 ? 3 :
+    windowWidth >= 520 ? 2 : 1;
+  const categoryGridGap = 8;
+  const categorySectionHorizontalPadding = 32;
+  const categoryCardWidth = Math.floor(
+    (windowWidth - categorySectionHorizontalPadding - categoryGridGap * 2 * categoryColumns) /
+      categoryColumns
+  );
+  const categoryToastWidth = Math.max(
+    180,
+    Math.min(windowWidth - 32, Math.floor(windowWidth / 3))
+  );
 
   const [loading, setLoading] = useState(true);
 
-  // Competições
   const [competitions, setCompetitions] = useState<Competition[]>([]);
-  const [competitionModalVisible, setCompetitionModalVisible] = useState(false);
-  const [savingCompetition, setSavingCompetition] = useState(false);
-  const [editingCompetition, setEditingCompetition] =
-    useState<Competition | null>(null);
-
-  const [compTitle, setCompTitle] = useState('');
-  const [compDescription, setCompDescription] = useState('');
-  const [compLocation, setCompLocation] = useState('');
-  const [compStartDisplay, setCompStartDisplay] = useState('');
-  const [compEndDisplay, setCompEndDisplay] = useState('');
-  const [compStartDigits, setCompStartDigits] = useState('');
-  const [compEndDigits, setCompEndDigits] = useState('');
 
   // Próximos jogos
   const [matches, setMatches] = useState<Match[]>([]);
@@ -146,6 +133,10 @@ export default function DiretoriaScreen() {
   const [newsDescription, setNewsDescription] = useState('');
   const [newsImageUri, setNewsImageUri] = useState<string | null>(null);
   const [newsImageUrl, setNewsImageUrl] = useState<string | null>(null);
+  const [categoryAgeRows, setCategoryAgeRows] = useState<CategoryAgeRow[]>([]);
+  const [savingCategories, setSavingCategories] = useState(false);
+  const [categoryFeedback, setCategoryFeedback] = useState<CategoryFeedback | null>(null);
+  const [categoryHelpVisible, setCategoryHelpVisible] = useState(false);
 
   // ---------------- CARREGAMENTO ----------------
 
@@ -155,6 +146,7 @@ export default function DiretoriaScreen() {
       const [
         { data: competitionsData, error: competitionsError },
         { data: matchesData, error: matchesError },
+        { data: categoriesData, error: categoriesError },
       ] = await Promise.all([
         supabase
           .from('competitions')
@@ -168,6 +160,10 @@ export default function DiretoriaScreen() {
             'id, competition_id, home_team, away_team, score_home, score_away, match_time, youtube_link, round'
           )
           .order('created_at', { ascending: false }),
+        supabase
+          .from('categories')
+          .select('id, name, age_min, age_max')
+          .order('name', { ascending: true }),
       ]);
 
       let newsData: NewsItem[] = [];
@@ -199,10 +195,25 @@ export default function DiretoriaScreen() {
       if (matchesError) {
         console.error('[Diretoria] Erro ao carregar jogos:', matchesError.message);
       }
+      if (categoriesError) {
+        console.error('[Diretoria] Erro ao carregar categorias:', categoriesError.message);
+      }
 
       setCompetitions((competitionsData ?? []) as Competition[]);
       setMatches((matchesData ?? []) as Match[]);
       setNewsItems(newsData);
+      setCategoryAgeRows(
+        ((categoriesData ?? []) as Array<{
+          id: number;
+          name: string;
+          age_min: number | null;
+          age_max: number | null;
+        }>).map(item => ({
+          ...item,
+          ageMinInput: item.age_min !== null ? String(item.age_min) : '',
+          ageMaxInput: item.age_max !== null ? String(item.age_max) : '',
+        }))
+      );
     } catch (err) {
       console.error('[Diretoria] Erro inesperado ao carregar dados:', err);
       Alert.alert('Erro', 'Ocorreu um erro ao carregar as informações.');
@@ -215,130 +226,15 @@ export default function DiretoriaScreen() {
     loadData();
   }, []);
 
-  // ---------------- COMPETIÇÕES ----------------
+  useEffect(() => {
+    if (!categoryFeedback) return;
 
-  function openNewCompetitionModal() {
-    setEditingCompetition(null);
-    setCompTitle('');
-    setCompDescription('');
-    setCompLocation('');
-    setCompStartDisplay('');
-    setCompEndDisplay('');
-    setCompStartDigits('');
-    setCompEndDigits('');
-    setCompetitionModalVisible(true);
-  }
+    const timeout = setTimeout(() => {
+      setCategoryFeedback(null);
+    }, 3200);
 
-  function openEditCompetitionModal(item: Competition) {
-    setEditingCompetition(item);
-    setCompTitle(item.title);
-    setCompDescription(item.description ?? '');
-    setCompLocation(item.location ?? '');
-    setCompStartDigits('');
-    setCompEndDigits('');
-    setCompStartDisplay(
-      item.start_date ? isoToBrDate(item.start_date) : ''
-    );
-    setCompEndDisplay(item.end_date ? isoToBrDate(item.end_date) : '');
-    setCompetitionModalVisible(true);
-  }
-
-  function handleCompStartChange(text: string) {
-    const masked = maskDate(text);
-    setCompStartDisplay(masked);
-    setCompStartDigits(masked.replace(/\D/g, ''));
-  }
-
-  function handleCompEndChange(text: string) {
-    const masked = maskDate(text);
-    setCompEndDisplay(masked);
-    setCompEndDigits(masked.replace(/\D/g, ''));
-  }
-
-  async function handleSaveCompetition() {
-    if (!compTitle.trim()) {
-      Alert.alert('Campos obrigatórios', 'Informe ao menos o título da competição.');
-      return;
-    }
-
-    const startIso =
-      compStartDigits.length === 8 ? digitsToIso(compStartDigits) : null;
-    const endIso =
-      compEndDigits.length === 8 ? digitsToIso(compEndDigits) : null;
-
-    const payload = {
-      title: compTitle.trim(),
-      description: compDescription.trim() || null,
-      location: compLocation.trim() || null,
-      start_date: startIso,
-      end_date: endIso,
-    };
-
-    setSavingCompetition(true);
-    try {
-      if (!editingCompetition) {
-        const { error } = await supabase.from('competitions').insert(payload);
-        if (error) {
-          console.error('[Diretoria] Erro ao inserir competição:', error.message);
-          Alert.alert('Erro', 'Não foi possível salvar a competição.');
-          setSavingCompetition(false);
-          return;
-        }
-      } else {
-        const { error } = await supabase
-          .from('competitions')
-          .update(payload)
-          .eq('id', editingCompetition.id);
-        if (error) {
-          console.error('[Diretoria] Erro ao atualizar competição:', error.message);
-          Alert.alert('Erro', 'Não foi possível atualizar a competição.');
-          setSavingCompetition(false);
-          return;
-        }
-      }
-
-      setCompetitionModalVisible(false);
-      setEditingCompetition(null);
-      await loadData();
-    } catch (err) {
-      console.error('[Diretoria] Erro inesperado ao salvar competição:', err);
-      Alert.alert('Erro', 'Ocorreu um erro ao salvar a competição.');
-    } finally {
-      setSavingCompetition(false);
-    }
-  }
-
-  async function handleDeleteCompetition(item: Competition) {
-    Alert.alert(
-      'Excluir competição',
-      `Tem certeza de que deseja excluir "${item.title}"?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Excluir',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('competitions')
-                .delete()
-                .eq('id', item.id);
-
-              if (error) {
-                console.error('[Diretoria] Erro ao excluir competição:', error.message);
-                Alert.alert('Erro', 'Não foi possível excluir a competição.');
-                return;
-              }
-              await loadData();
-            } catch (err) {
-              console.error('[Diretoria] Erro inesperado ao excluir competição:', err);
-              Alert.alert('Erro', 'Ocorreu um erro ao excluir a competição.');
-            }
-          },
-        },
-      ]
-    );
-  }
+    return () => clearTimeout(timeout);
+  }, [categoryFeedback]);
 
   // ---------------- JOGOS ----------------
 
@@ -702,13 +598,173 @@ export default function DiretoriaScreen() {
     });
   }
 
+  function formatAgeSummary(ageMin: number | null, ageMax: number | null): string {
+    if (ageMin === null && ageMax === null) {
+      return 'Sem restrição etária.';
+    }
+    if (ageMin !== null && ageMax !== null) {
+      return `Faixa atual: ${ageMin} a ${ageMax} anos.`;
+    }
+    if (ageMin !== null) {
+      return `Faixa atual: a partir de ${ageMin} anos.`;
+    }
+    return `Faixa atual: até ${ageMax} anos.`;
+  }
+
+  function normalizeAgeInput(value: string): string {
+    return value.replace(/\D/g, '').slice(0, 2);
+  }
+
+  function updateCategoryAgeInput(
+    categoryId: number,
+    field: 'ageMinInput' | 'ageMaxInput',
+    value: string
+  ) {
+    const normalizedValue = normalizeAgeInput(value);
+    setCategoryAgeRows(prev =>
+      prev.map(item =>
+        item.id === categoryId ? { ...item, [field]: normalizedValue } : item
+      )
+    );
+  }
+
+  function showCategoryAgeHelp() {
+    setCategoryHelpVisible(true);
+  }
+
+  function setCategoryFeedbackMessage(
+    type: CategoryFeedback['type'],
+    message: string
+  ) {
+    setCategoryFeedback({ type, message });
+  }
+
+  async function handleSaveAllCategoryAges() {
+    setCategoryFeedback(null);
+    const changes = categoryAgeRows.map(item => {
+      const ageMinWasCleared =
+        item.ageMinInput.trim() === '' && item.age_min !== null;
+      const ageMaxWasCleared =
+        item.ageMaxInput.trim() === '' && item.age_max !== null;
+      const nextAgeMin =
+        item.ageMinInput.trim() === ''
+          ? item.age_min
+          : parseInt(item.ageMinInput, 10);
+      const nextAgeMax =
+        item.ageMaxInput.trim() === ''
+          ? item.age_max
+          : parseInt(item.ageMaxInput, 10);
+
+      return {
+        item,
+        nextAgeMin,
+        nextAgeMax,
+        ageMinChanged: !ageMinWasCleared && nextAgeMin !== item.age_min,
+        ageMaxChanged: !ageMaxWasCleared && nextAgeMax !== item.age_max,
+      };
+    });
+
+    const invalidNumber = changes.find(
+      ({ nextAgeMin, nextAgeMax }) =>
+        (nextAgeMin !== null && Number.isNaN(nextAgeMin)) ||
+        (nextAgeMax !== null && Number.isNaN(nextAgeMax))
+    );
+    if (invalidNumber) {
+      setCategoryFeedbackMessage(
+        'error',
+        `Revise os valores informados para a categoria "${invalidNumber.item.name}".`
+      );
+      return;
+    }
+
+    const invalidRange = changes.find(
+      ({ nextAgeMin, nextAgeMax }) =>
+        nextAgeMin !== null &&
+        nextAgeMax !== null &&
+        nextAgeMin > nextAgeMax
+    );
+    if (invalidRange) {
+      setCategoryFeedbackMessage(
+        'error',
+        `Na categoria "${invalidRange.item.name}", a idade mínima não pode ser maior que a idade máxima.`
+      );
+      return;
+    }
+
+    const changedRows = changes.filter(
+      ({ ageMinChanged, ageMaxChanged }) => ageMinChanged || ageMaxChanged
+    );
+
+    if (changedRows.length === 0) {
+      setCategoryFeedbackMessage(
+        'info',
+        'Nenhuma faixa etária foi modificada.'
+      );
+      return;
+    }
+
+    setSavingCategories(true);
+    try {
+      for (const change of changedRows) {
+        const payload: { age_min?: number | null; age_max?: number | null } = {};
+        if (change.ageMinChanged) payload.age_min = change.nextAgeMin;
+        if (change.ageMaxChanged) payload.age_max = change.nextAgeMax;
+
+        const { error } = await supabase
+          .from('categories')
+          .update(payload)
+          .eq('id', change.item.id);
+
+        if (error) {
+          console.error('[Diretoria] Erro ao atualizar categoria:', error.message);
+          setCategoryFeedbackMessage(
+            'error',
+            `Não foi possível atualizar a faixa etária de "${change.item.name}".`
+          );
+          return;
+        }
+      }
+
+      setCategoryAgeRows(prev =>
+        prev.map(item => {
+          const changed = changedRows.find(row => row.item.id === item.id);
+          if (!changed) return item;
+
+          return {
+            ...item,
+            age_min: changed.nextAgeMin,
+            age_max: changed.nextAgeMax,
+            ageMinInput:
+              changed.nextAgeMin !== null ? String(changed.nextAgeMin) : '',
+            ageMaxInput:
+              changed.nextAgeMax !== null ? String(changed.nextAgeMax) : '',
+          };
+        })
+      );
+
+      setCategoryFeedbackMessage(
+        'success',
+        `${changedRows.length} ${changedRows.length === 1 ? 'categoria foi atualizada' : 'categorias foram atualizadas'} com sucesso.`
+      );
+    } catch (err) {
+      console.error('[Diretoria] Erro inesperado ao salvar categorias:', err);
+      setCategoryFeedbackMessage(
+        'error',
+        'Ocorreu um erro inesperado ao salvar as faixas etárias.'
+      );
+    } finally {
+      setSavingCategories(false);
+    }
+  }
+
   // ---------------- RENDER ----------------
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
-    >
+    <View style={styles.screen}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
+      >
       {/* <Text style={styles.pageTitle}>Diretoria</Text> */}
 
       {loading && (
@@ -717,77 +773,7 @@ export default function DiretoriaScreen() {
         </View>
       )}
 
-      {/* --------- Card 1: Competições / Etapas --------- */}
-      <View style={styles.cardSection}>
-        <View style={styles.cardHeaderRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>Competições / Etapas</Text>
-            <Text style={styles.cardDescription}>
-              Cadastre as competições e etapas oficiais do calendário.
-            </Text>
-          </View>
-
-          {isDiretoriaOrAdmin && (
-            <TouchableOpacity
-              style={styles.cardHeaderFab}
-              onPress={openNewCompetitionModal}
-              activeOpacity={0.9}
-            >
-              <Ionicons name="add" size={22} color="#FFF" />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {competitions.length === 0 ? (
-          <Text style={styles.emptyText}>
-            Nenhuma competição cadastrada até o momento.
-          </Text>
-        ) : (
-          competitions.map(item => (
-            <View key={item.id} style={styles.itemCard}>
-              <View style={styles.itemHeaderRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.itemTitle}>{item.title}</Text>
-                  {item.location ? (
-                    <Text style={styles.itemSubText}>{item.location}</Text>
-                  ) : null}
-                  <Text style={styles.itemSubText}>
-                    {formatDateRange(item.start_date, item.end_date)}
-                  </Text>
-                </View>
-
-                {isDiretoriaOrAdmin && (
-                  <View style={styles.itemActionsRow}>
-                    <TouchableOpacity
-                      style={styles.iconButton}
-                      onPress={() => openEditCompetitionModal(item)}
-                    >
-                      <Ionicons
-                        name="create-outline"
-                        size={18}
-                        color={AppTheme.textSecondary}
-                      />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.iconButton}
-                      onPress={() => handleDeleteCompetition(item)}
-                    >
-                      <Ionicons name="trash-outline" size={18} color="#C62828" />
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-
-              {item.description ? (
-                <Text style={styles.itemBodyText}>{item.description}</Text>
-              ) : null}
-
-            </View>
-          ))
-        )}
-      </View>
-
-      {/* --------- Card 2: Próximos jogos --------- */}
+      {/* --------- Card 1: Próximos jogos --------- */}
       <View style={styles.cardSection}>
         <View style={styles.cardHeaderRow}>
           <View style={{ flex: 1 }}>
@@ -892,6 +878,113 @@ export default function DiretoriaScreen() {
       <View style={styles.cardSection}>
         <View style={styles.cardHeaderRow}>
           <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle}>Categorias por idade</Text>
+            <Text style={styles.cardDescription}>
+              Ajuste a idade mínima e máxima de cada categoria usada nos times.
+            </Text>
+          </View>
+
+          {isDiretoriaOrAdmin ? (
+            <TouchableOpacity
+              style={styles.categorySaveAllButton}
+              onPress={handleSaveAllCategoryAges}
+              activeOpacity={0.9}
+              disabled={savingCategories}
+            >
+              {savingCategories ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Text style={styles.categorySaveAllButtonText}>Salvar tudo</Text>
+              )}
+            </TouchableOpacity>
+          ) : null}
+
+          <TouchableOpacity
+            style={styles.helpButton}
+            onPress={showCategoryAgeHelp}
+            activeOpacity={0.9}
+          >
+            <Ionicons name="help" size={18} color={AppTheme.primary} />
+          </TouchableOpacity>
+        </View>
+
+        {categoryAgeRows.length === 0 ? (
+          <Text style={styles.emptyText}>Nenhuma categoria cadastrada.</Text>
+        ) : (
+          <View style={styles.categoryAgeGrid}>
+            {categoryAgeRows.map(item => {
+              return (
+                <View
+                  key={item.id}
+                  style={[
+                    styles.categoryAgeGridItem,
+                    { width: categoryCardWidth },
+                  ]}
+                >
+                  <View style={styles.categoryAgeCard}>
+                    <View style={styles.categoryAgeTopRow}>
+                      <View style={styles.categoryAgeTitleWrap}>
+                        <Text style={styles.categoryAgeTitle} numberOfLines={1}>
+                          {item.name}
+                        </Text>
+                        <Text style={styles.categoryAgeSummary} numberOfLines={2}>
+                          {formatAgeSummary(item.age_min, item.age_max)}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.categoryAgeInputsRow}>
+                      <View style={styles.categoryAgeInputColumn}>
+                        <Text style={styles.categoryAgeLabel}>Mín.</Text>
+                        <TextInput
+                          key={`category-${item.id}-min`}
+                          style={styles.categoryAgeInput}
+                          value={item.ageMinInput}
+                          onChangeText={value =>
+                            updateCategoryAgeInput(item.id, 'ageMinInput', value)
+                          }
+                          keyboardType="number-pad"
+                          placeholder=""
+                          editable={isDiretoriaOrAdmin && !savingCategories}
+                          autoComplete="off"
+                          textContentType="none"
+                          importantForAutofill="no"
+                        />
+                      </View>
+
+                      <View style={styles.categoryAgeInputColumn}>
+                        <Text style={styles.categoryAgeLabel}>Máx.</Text>
+                        <TextInput
+                          key={`category-${item.id}-max`}
+                          style={styles.categoryAgeInput}
+                          value={item.ageMaxInput}
+                          onChangeText={value =>
+                            updateCategoryAgeInput(item.id, 'ageMaxInput', value)
+                          }
+                          keyboardType="number-pad"
+                          placeholder=""
+                          editable={isDiretoriaOrAdmin && !savingCategories}
+                          autoComplete="off"
+                          textContentType="none"
+                          importantForAutofill="no"
+                        />
+                      </View>
+                    </View>
+
+                    <View style={styles.categoryAgeBottomRow}>
+                      <Text style={styles.categoryAgeHint}>Vazio = livre</Text>
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </View>
+
+      <View style={styles.cardSection}>
+        <View style={styles.cardHeaderRow}>
+          <View style={{ flex: 1 }}>
             <Text style={styles.cardTitle}>Notícias</Text>
             <Text style={styles.cardDescription}>
               Cadastre as notícias exibidas na tela inicial.
@@ -947,96 +1040,6 @@ export default function DiretoriaScreen() {
           })
         )}
       </View>
-
-      {/* ------------ MODAL: COMPETIÇÃO ------------ */}
-      <Modal
-        visible={competitionModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
-          if (!savingCompetition) {
-            setCompetitionModalVisible(false);
-            setEditingCompetition(null);
-          }
-        }}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>
-              {editingCompetition ? 'Editar competição' : 'Nova competição'}
-            </Text>
-
-            <Text style={styles.fieldLabel}>Título</Text>
-            <TextInput
-              style={styles.input}
-              value={compTitle}
-              onChangeText={setCompTitle}
-              placeholder="Ex.: Liga Estadual, Etapa Sul..."
-            />
-
-            <Text style={styles.fieldLabel}>Descrição</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              value={compDescription}
-              onChangeText={setCompDescription}
-              placeholder="Informações gerais, categoria, observações..."
-              multiline
-            />
-
-            <Text style={styles.fieldLabel}>Local</Text>
-            <TextInput
-              style={styles.input}
-              value={compLocation}
-              onChangeText={setCompLocation}
-              placeholder="Cidade, ginásio..."
-            />
-
-            <Text style={styles.fieldLabel}>Data inicial (dd/mm/aaaa)</Text>
-            <TextInput
-              style={styles.input}
-              value={compStartDisplay}
-              onChangeText={handleCompStartChange}
-              keyboardType="number-pad"
-              placeholder="__/__/____"
-            />
-
-            <Text style={styles.fieldLabel}>Data final (dd/mm/aaaa)</Text>
-            <TextInput
-              style={styles.input}
-              value={compEndDisplay}
-              onChangeText={handleCompEndChange}
-              keyboardType="number-pad"
-              placeholder="__/__/____"
-            />
-
-            <View style={styles.modalButtonsRow}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonOutline]}
-                onPress={() => {
-                  if (!savingCompetition) {
-                    setCompetitionModalVisible(false);
-                    setEditingCompetition(null);
-                  }
-                }}
-              >
-                <Text style={styles.modalButtonOutlineText}>Cancelar</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonPrimary]}
-                onPress={handleSaveCompetition}
-                disabled={savingCompetition}
-              >
-                {savingCompetition ? (
-                  <ActivityIndicator color="#FFF" />
-                ) : (
-                  <Text style={styles.modalButtonPrimaryText}>Salvar</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       {/* ------------ MODAL: JOGO ------------ */}
       <Modal
@@ -1187,6 +1190,37 @@ export default function DiretoriaScreen() {
       </Modal>
 
       <Modal
+        visible={categoryHelpVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCategoryHelpVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Como funcionam as idades</Text>
+            <Text style={styles.helpModalText}>
+              Defina a idade mínima e máxima de cada categoria. Se os dois campos
+              ficarem vazios, a categoria não terá restrição etária.
+            </Text>
+            <Text style={styles.helpModalText}>
+              Nos times, um atleta com idade fora da faixa continua podendo ser
+              vinculado, mas aparecerá com um ícone de alerta laranja, a idade
+              destacada e a mensagem "Idade incompatível com a categoria deste time".
+            </Text>
+
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonPrimary]}
+                onPress={() => setCategoryHelpVisible(false)}
+              >
+                <Text style={styles.modalButtonPrimaryText}>Fechar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={newsModalVisible}
         transparent
         animationType="slide"
@@ -1276,13 +1310,47 @@ export default function DiretoriaScreen() {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+      </ScrollView>
+
+      {categoryFeedback ? (
+        <View
+          pointerEvents="box-none"
+          style={styles.categoryToastHost}
+        >
+          <View
+            style={[
+              styles.categoryToast,
+              { width: categoryToastWidth },
+              categoryFeedback.type === 'success' && styles.categoryToastSuccess,
+              categoryFeedback.type === 'error' && styles.categoryToastError,
+              categoryFeedback.type === 'info' && styles.categoryToastInfo,
+            ]}
+          >
+            <View style={styles.categoryToastContent}>
+              <Text style={styles.categoryToastText}>
+                {categoryFeedback.message}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setCategoryFeedback(null)}
+                style={styles.categoryToastClose}
+              >
+                <Ionicons name="close" size={16} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
 // ---------------- ESTILOS ----------------
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: AppTheme.background,
+  },
   container: {
     flex: 1,
     backgroundColor: AppTheme.background,
@@ -1327,11 +1395,78 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: 8,
   },
+  helpButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  categorySaveAllButton: {
+    minWidth: 96,
+    height: 34,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: AppTheme.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  categorySaveAllButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
 
   emptyText: {
     fontSize: 13,
     color: AppTheme.textSecondary,
     marginTop: 6,
+  },
+  categoryToastHost: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    zIndex: 20,
+    alignItems: 'flex-end',
+  },
+  categoryToast: {
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    shadowColor: '#000000',
+    shadowOpacity: 0.14,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  categoryToastContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  categoryToastText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  categoryToastClose: {
+    marginLeft: 10,
+    padding: 2,
+  },
+  categoryToastSuccess: {
+    backgroundColor: '#2E7D32',
+  },
+  categoryToastError: {
+    backgroundColor: '#C62828',
+  },
+  categoryToastInfo: {
+    backgroundColor: '#355C9A',
   },
 
   // Itens (competição / jogo)
@@ -1464,6 +1599,77 @@ const styles = StyleSheet.create({
   scoreColumn: {
     flex: 1,
   },
+  categoryAgeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -4,
+    marginTop: 6,
+  },
+  categoryAgeGridItem: {
+    paddingHorizontal: 4,
+    marginBottom: 8,
+  },
+  categoryAgeCard: {
+    minHeight: 148,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: AppTheme.border,
+    backgroundColor: '#FFFFFF',
+  },
+  categoryAgeTopRow: {
+    minHeight: 40,
+  },
+  categoryAgeTitleWrap: {
+    flex: 1,
+  },
+  categoryAgeTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: AppTheme.textPrimary,
+  },
+  categoryAgeSummary: {
+    fontSize: 11,
+    color: AppTheme.textSecondary,
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  categoryAgeInputsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 8,
+  },
+  categoryAgeInputColumn: {
+    flex: 1,
+  },
+  categoryAgeLabel: {
+    fontSize: 11,
+    color: AppTheme.textSecondary,
+    marginBottom: 4,
+  },
+  categoryAgeInput: {
+    height: 34,
+    backgroundColor: '#FFFFFF',
+    borderColor: AppTheme.border,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  categoryAgeBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    marginTop: 10,
+    gap: 6,
+  },
+  categoryAgeHint: {
+    fontSize: 11,
+    color: AppTheme.textMuted,
+  },
 
   // Modal
   modalOverlay: {
@@ -1486,6 +1692,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: AppTheme.textPrimary,
+    marginBottom: 10,
+  },
+  helpModalText: {
+    fontSize: 14,
+    color: AppTheme.textPrimary,
+    lineHeight: 20,
     marginBottom: 10,
   },
   fieldLabel: {
